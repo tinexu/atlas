@@ -66,6 +66,12 @@ public protocol SystemAdapter: Sendable {
     /// Politely asks an app to quit; the app still prompts about unsaved
     /// work. Returns false if the app refused or is still running.
     func quitApplication(bundleID: String) async throws -> Bool
+    /// Hides every window of a running app without quitting it. Returns
+    /// false if the app wasn't running.
+    func hideApplication(bundleID: String) async throws -> Bool
+    /// Minimizes a running app's windows into the Dock (needs
+    /// Accessibility). Returns how many windows were minimized.
+    func minimizeApplicationWindows(bundleID: String) async throws -> Int
     func open(url: URL, withApplication bundleID: String?) async throws
     func openFile(atPath path: String, withApplication bundleID: String?) async throws
     func reveal(path: String) async throws

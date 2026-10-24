@@ -110,6 +110,17 @@ public actor AutomationEngine {
         }
     }
 
+    /// Waits for a run begun with `start(_:trigger:)` and returns its
+    /// finished record. Lets a caller learn the run ID straight away (to show
+    /// progress) and still collect the outcome later.
+    public func result(of runID: UUID) async -> WorkflowRun? {
+        if let task = activeRuns[runID] {
+            return await task.value
+        }
+        // Already finished: history has it.
+        return try? store?.run(id: runID)
+    }
+
     /// Invokes a single registered action through the full engine path.
     /// This is how a 3D room object, a keyboard shortcut or a Companion
     /// command runs an action, so all of them get the same validation,

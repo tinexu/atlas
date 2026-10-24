@@ -6,9 +6,24 @@ import SwiftUI
 /// without opening the main window.
 struct MenuBarContent: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var spaces: SpacesModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        if !spaces.spaces.isEmpty {
+            Section("Spaces") {
+                ForEach(spaces.spaces) { space in
+                    // A toggle renders as a checkmark item in a menu.
+                    Toggle(space.name, isOn: Binding(
+                        get: { spaces.activeSpaceID == space.id },
+                        set: { _ in spaces.activate(space.id) }
+                    ))
+                    .disabled(model.isPaused)
+                }
+            }
+            Divider()
+        }
+
         if model.workflows.isEmpty {
             Text("No automations yet")
         } else {

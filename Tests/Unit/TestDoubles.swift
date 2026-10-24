@@ -55,6 +55,16 @@ final class MockSystemAdapter: SystemAdapter, @unchecked Sendable {
         return true
     }
 
+    func hideApplication(bundleID: String) async throws -> Bool {
+        record("hide:\(bundleID)")
+        return lock.synchronized { _running.contains(bundleID) }
+    }
+
+    func minimizeApplicationWindows(bundleID: String) async throws -> Int {
+        record("minimize:\(bundleID)")
+        return lock.synchronized { _running.contains(bundleID) ? 1 : 0 }
+    }
+
     func open(url: URL, withApplication bundleID: String?) async throws {
         record("open-url:\(url.absoluteString)")
         if failsToOpenURLs { throw SystemAdapterError.couldNotOpen(url.absoluteString) }

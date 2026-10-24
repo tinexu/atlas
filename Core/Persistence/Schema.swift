@@ -67,6 +67,48 @@ enum Schema {
             value_json  TEXT NOT NULL
         );
         """,
+
+        // v2 — Stage 02: Spaces. The active Space is a user_preference row
+        // (`spaces.activeSpaceID`), so it needs no table of its own.
+        """
+        CREATE TABLE space (
+            id                   TEXT PRIMARY KEY,
+            name                 TEXT NOT NULL,
+            group_name           TEXT NOT NULL,
+            template_id          TEXT NOT NULL,
+            accent_color         TEXT NOT NULL,
+            slot                 INTEGER NOT NULL DEFAULT 0,
+            transition_behavior  TEXT NOT NULL DEFAULT 'leaveRunning',
+            is_pinned            INTEGER NOT NULL DEFAULT 0,
+            created_at           REAL NOT NULL,
+            updated_at           REAL NOT NULL
+        );
+        CREATE INDEX idx_space_slot ON space(slot);
+
+        -- No foreign key to workflow: a profile whose automation was deleted
+        -- stays visible and reports the problem instead of vanishing.
+        CREATE TABLE activation_profile (
+            id           TEXT PRIMARY KEY,
+            space_id     TEXT NOT NULL REFERENCES space(id) ON DELETE CASCADE,
+            position     INTEGER NOT NULL DEFAULT 0,
+            name         TEXT NOT NULL,
+            workflow_id  TEXT NOT NULL,
+            is_default   INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_activation_profile_space ON activation_profile(space_id, position);
+
+        CREATE TABLE space_object (
+            id               TEXT PRIMARY KEY,
+            space_id         TEXT NOT NULL REFERENCES space(id) ON DELETE CASCADE,
+            kind             TEXT NOT NULL,
+            label            TEXT,
+            transform_json   TEXT NOT NULL,
+            action_id        TEXT,
+            parameters_json  TEXT NOT NULL DEFAULT '{}',
+            workflow_id      TEXT
+        );
+        CREATE INDEX idx_space_object_space ON space_object(space_id);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

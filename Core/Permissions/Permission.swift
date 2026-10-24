@@ -32,7 +32,7 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
     public var explanation: String {
         switch self {
         case .accessibility:
-            return "Lets ATLAS move and resize other apps' windows so a Space can restore its layout. Needed from Stage 03 (Spatial Window Manager); nothing in Stage 01 uses it."
+            return "Lets ATLAS minimize other apps' windows when you switch to a Space set to “Minimize previous”, and later move and resize windows to restore a layout (Stage 03). Hiding apps doesn't need it."
         case .automation:
             return "Lets ATLAS send Apple Events to a specific app, e.g. telling Terminal which folder to open. macOS asks separately for each app the first time it's needed."
         case .notifications:

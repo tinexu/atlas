@@ -7,6 +7,8 @@ public enum BuiltInActions {
         [
             LaunchApplicationAction(),
             QuitApplicationAction(),
+            HideApplicationAction(),
+            MinimizeApplicationAction(),
             OpenURLAction(),
             OpenFileAction(),
             RevealInFinderAction(),
@@ -88,6 +90,66 @@ public struct QuitApplicationAction: AtlasAction {
             throw ActionError.failed("\(name) didn't quit. It may be waiting for you to save something.")
         }
         return ActionOutput("Quit \(name)", values: ["didQuit": true])
+    }
+}
+
+public struct HideApplicationAction: AtlasAction {
+    public static let id: ActionID = "application.hide"
+
+    public let descriptor = ActionDescriptor(
+        id: HideApplicationAction.id,
+        title: "Hide App",
+        summary: "Hides an app's windows without quitting it. Click its Dock icon to bring it back.",
+        category: "Applications",
+        symbolName: "eye.slash",
+        parameters: [
+            ParameterSpec(key: "bundleId", label: "App", kind: .bundleIdentifier,
+                          help: "Bundle identifier, e.g. com.apple.Music"),
+        ],
+        sideEffects: [.hidesApplication],
+        isIdempotent: true,
+        defaultTimeout: 10
+    )
+
+    public init() {}
+
+    public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
+        let bundleID = try parameters.requiredString("bundleId")
+        let name = context.system.applicationName(for: bundleID) ?? bundleID
+        let hidden = try await context.system.hideApplication(bundleID: bundleID)
+        return ActionOutput(hidden ? "Hid \(name)" : "\(name) wasn't running", values: ["didHide": .bool(hidden)])
+    }
+}
+
+public struct MinimizeApplicationAction: AtlasAction {
+    public static let id: ActionID = "application.minimize"
+
+    public let descriptor = ActionDescriptor(
+        id: MinimizeApplicationAction.id,
+        title: "Minimize App Windows",
+        summary: "Minimizes every window of an app into the Dock. The app keeps running.",
+        category: "Applications",
+        symbolName: "dock.arrow.down.rectangle",
+        parameters: [
+            ParameterSpec(key: "bundleId", label: "App", kind: .bundleIdentifier,
+                          help: "Bundle identifier, e.g. com.apple.Safari"),
+        ],
+        permissions: [.accessibility],
+        sideEffects: [.hidesApplication],
+        isIdempotent: true,
+        defaultTimeout: 10
+    )
+
+    public init() {}
+
+    public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
+        let bundleID = try parameters.requiredString("bundleId")
+        let name = context.system.applicationName(for: bundleID) ?? bundleID
+        let count = try await context.system.minimizeApplicationWindows(bundleID: bundleID)
+        let message = count == 0
+            ? "\(name) had no windows to minimize"
+            : "Minimized \(count) \(name) window\(count == 1 ? "" : "s")"
+        return ActionOutput(message, values: ["windowsMinimized": .number(Double(count))])
     }
 }
 

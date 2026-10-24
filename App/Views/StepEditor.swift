@@ -147,7 +147,7 @@ struct StepCard: View {
 }
 
 /// An input control chosen by parameter kind.
-private struct ParameterField: View {
+struct ParameterField: View {
     let spec: ParameterSpec
     @Binding var value: ActionValue?
 

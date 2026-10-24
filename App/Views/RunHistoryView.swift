@@ -18,7 +18,7 @@ struct RunHistoryView: View {
                         StateIcon(state: run.state).frame(width: 18)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(run.workflowName).fontWeight(.medium)
-                            Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                            Text("\(run.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(Formatting.trigger(run.trigger))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

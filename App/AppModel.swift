@@ -7,11 +7,12 @@ import SwiftUI
 @MainActor
 final class AppModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case automations, history, actions, permissions
+        case spaces, automations, history, actions, permissions
         var id: Self { self }
 
         var title: String {
             switch self {
+            case .spaces: return "Spaces"
             case .automations: return "Automations"
             case .history: return "Run History"
             case .actions: return "Action Library"
@@ -21,6 +22,7 @@ final class AppModel: ObservableObject {
 
         var symbol: String {
             switch self {
+            case .spaces: return "cube.transparent"
             case .automations: return "bolt.horizontal.circle"
             case .history: return "clock.arrow.circlepath"
             case .actions: return "square.grid.2x2"
@@ -35,7 +37,7 @@ final class AppModel: ObservableObject {
         var id: UUID { request.id }
     }
 
-    @Published var section: Section = .automations
+    @Published var section: Section = .spaces
     @Published private(set) var workflows: [Workflow] = []
     @Published var selectedWorkflowID: UUID?
     @Published private(set) var runs: [WorkflowRun] = []
@@ -49,6 +51,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var startupError: String?
 
     let core: AtlasCore?
+    let spaces: SpacesModel
     private var eventTask: Task<Void, Never>?
 
     init() {
@@ -56,9 +59,12 @@ final class AppModel: ObservableObject {
             core = try AtlasCore.live()
         } catch {
             core = nil
+            spaces = SpacesModel(core: nil)
             startupError = error.localizedDescription
             return
         }
+        spaces = SpacesModel(core: core)
+        spaces.onError = { [weak self] message in self?.errorMessage = message }
         reloadWorkflows()
         reloadRuns()
         disabledActions = core?.permissions.disabledActions ?? []

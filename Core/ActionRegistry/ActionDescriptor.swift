@@ -59,6 +59,7 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
 public enum SideEffect: String, Codable, CaseIterable, Sendable {
     case launchesApplication
     case terminatesApplication
+    case hidesApplication
     case opensURL
     case opensDocument
     case showsUI
@@ -70,6 +71,7 @@ public enum SideEffect: String, Codable, CaseIterable, Sendable {
         switch self {
         case .launchesApplication: return "Launches apps"
         case .terminatesApplication: return "Quits apps"
+        case .hidesApplication: return "Hides apps"
         case .opensURL: return "Opens links"
         case .opensDocument: return "Opens documents"
         case .showsUI: return "Shows Finder windows"

@@ -11,6 +11,7 @@ struct AtlasApp: App {
         WindowGroup("ATLAS", id: "main") {
             RootView()
                 .environmentObject(model)
+                .environmentObject(model.spaces)
                 .frame(minWidth: 940, minHeight: 600)
         }
         .commands {
@@ -25,6 +26,7 @@ struct AtlasApp: App {
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
             }
+            SpacesCommands(spaces: model.spaces)
         }
 
         // Low-resource control surface (spec 9.4): run automations and pause
@@ -32,8 +34,37 @@ struct AtlasApp: App {
         MenuBarExtra {
             MenuBarContent()
                 .environmentObject(model)
+                .environmentObject(model.spaces)
         } label: {
             Image(systemName: model.isPaused ? "pause.circle" : "globe.americas.fill")
+        }
+    }
+}
+
+/// The Spaces menu: Next/Previous Space and ⌘1…⌘9 for the first nine.
+/// These work from anywhere in the app, with or without the 3D view.
+struct SpacesCommands: Commands {
+    @ObservedObject var spaces: SpacesModel
+
+    var body: some Commands {
+        CommandMenu("Spaces") {
+            Button("Next Space") { spaces.activateNeighbor(1) }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .control])
+                .disabled(spaces.spaces.isEmpty)
+            Button("Previous Space") { spaces.activateNeighbor(-1) }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .control])
+                .disabled(spaces.spaces.isEmpty)
+            Divider()
+            ForEach(Array(spaces.spaces.prefix(9).enumerated()), id: \.element.id) { index, space in
+                Toggle(space.name, isOn: Binding(
+                    get: { spaces.activeSpaceID == space.id },
+                    set: { _ in
+                        spaces.selectedSpaceID = space.id
+                        spaces.activateFromShortcut(space.id)
+                    }
+                ))
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
+            }
         }
     }
 }

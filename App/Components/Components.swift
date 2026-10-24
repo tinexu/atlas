@@ -92,6 +92,10 @@ enum Formatting {
         switch trigger {
         case "manual": return "Run manually"
         case "menu-bar": return "Menu bar"
+        case "shortcut": return "Keyboard shortcut"
+        case "space.activated": return "Space activated"
+        case "space.transition": return "Space switch (tidying previous apps)"
+        case "space.object": return "Room object"
         default: return trigger
         }
     }

@@ -91,7 +91,7 @@ private struct WorkflowRow: View {
 
 // MARK: - Editor
 
-private struct WorkflowEditor: View {
+struct WorkflowEditor: View {
     @EnvironmentObject private var model: AppModel
     let original: Workflow
     @State private var draft: Workflow

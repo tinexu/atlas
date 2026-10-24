@@ -57,6 +57,40 @@ public struct MacSystemAdapter: SystemAdapter {
         return false
     }
 
+    public func hideApplication(bundleID: String) async throws -> Bool {
+        await MainActor.run {
+            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            guard !apps.isEmpty else { return false }
+            apps.filter { !$0.isHidden }.forEach { _ = $0.hide() }
+            return true
+        }
+    }
+
+    public func minimizeApplicationWindows(bundleID: String) async throws -> Int {
+        try await MainActor.run {
+            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            guard !apps.isEmpty else { return 0 }
+            guard AXIsProcessTrusted() else {
+                throw SystemAdapterError.permissionDenied(
+                    "Minimizing another app's windows needs Accessibility permission. Grant it on the Permissions screen."
+                )
+            }
+            var minimized = 0
+            for app in apps {
+                let element = AXUIElementCreateApplication(app.processIdentifier)
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &value) == .success,
+                      let windows = value as? [AXUIElement]
+                else { continue }
+                for window in windows
+                where AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) == .success {
+                    minimized += 1
+                }
+            }
+            return minimized
+        }
+    }
+
     public func open(url: URL, withApplication bundleID: String?) async throws {
         try await Self.open(urls: [url], with: bundleID, description: url.absoluteString)
     }

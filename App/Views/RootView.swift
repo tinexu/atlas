@@ -20,6 +20,7 @@ struct RootView: View {
                 .safeAreaInset(edge: .bottom) { pauseToggle }
             } detail: {
                 switch model.section {
+                case .spaces: SpacesView()
                 case .automations: AutomationsView()
                 case .history: RunHistoryView()
                 case .actions: ActionLibraryView()

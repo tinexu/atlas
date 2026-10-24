@@ -63,6 +63,8 @@ public struct SQLRow {
 public final class SQLiteDatabase: @unchecked Sendable {
     private var handle: OpaquePointer?
     private let lock = NSRecursiveLock()
+    /// Guarded by `lock`; > 0 while a transaction is open on this connection.
+    private var transactionDepth = 0
     public let path: String
 
     /// Pass ":memory:" for a throwaway database (tests).
@@ -131,10 +133,29 @@ public final class SQLiteDatabase: @unchecked Sendable {
         }
     }
 
-    /// Wraps `body` in a transaction, rolling back if it throws.
+    /// Wraps `body` in a transaction, rolling back if it throws. Nested
+    /// calls become savepoints, so a transactional method can call another.
     public func transaction<T>(_ body: () throws -> T) throws -> T {
         try withLock {
+            if transactionDepth > 0 {
+                let savepoint = "atlas_sp\(transactionDepth)"
+                try execute("SAVEPOINT \(savepoint);")
+                transactionDepth += 1
+                defer { transactionDepth -= 1 }
+                do {
+                    let result = try body()
+                    try execute("RELEASE \(savepoint);")
+                    return result
+                } catch {
+                    try? execute("ROLLBACK TO \(savepoint);")
+                    try? execute("RELEASE \(savepoint);")
+                    throw error
+                }
+            }
+
             try execute("BEGIN IMMEDIATE;")
+            transactionDepth = 1
+            defer { transactionDepth = 0 }
             do {
                 let result = try body()
                 try execute("COMMIT;")
