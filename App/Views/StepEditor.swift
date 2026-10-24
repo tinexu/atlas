@@ -203,7 +203,20 @@ struct ParameterField: View {
             }
 
         case .url, .text:
-            TextField(placeholder, text: text)
+            if let options = spec.options {
+                Picker(spec.label, selection: Binding(
+                    get: { value?.stringValue ?? spec.defaultValue?.stringValue ?? options.first ?? "" },
+                    set: { value = .string($0) }
+                )) {
+                    ForEach(options, id: \.self) { option in
+                        Text(WindowPreset(rawValue: option)?.title ?? option).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            } else {
+                TextField(placeholder, text: text)
+            }
         }
     }
 

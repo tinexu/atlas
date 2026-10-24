@@ -1,5 +1,6 @@
 import AppKit
 import AtlasCore
+import AtlasSpacesUI
 import SwiftUI
 
 /// UI-facing state. Owns no logic of its own: everything real happens in
@@ -7,12 +8,13 @@ import SwiftUI
 @MainActor
 final class AppModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case spaces, automations, history, actions, permissions
+        case spaces, windows, automations, history, actions, permissions
         var id: Self { self }
 
         var title: String {
             switch self {
             case .spaces: return "Spaces"
+            case .windows: return "Windows"
             case .automations: return "Automations"
             case .history: return "Run History"
             case .actions: return "Action Library"
@@ -23,6 +25,7 @@ final class AppModel: ObservableObject {
         var symbol: String {
             switch self {
             case .spaces: return "cube.transparent"
+            case .windows: return "macwindow.on.rectangle"
             case .automations: return "bolt.horizontal.circle"
             case .history: return "clock.arrow.circlepath"
             case .actions: return "square.grid.2x2"
@@ -52,7 +55,10 @@ final class AppModel: ObservableObject {
 
     let core: AtlasCore?
     let spaces: SpacesModel
+    let windowManager: WindowManagerModel
     private var eventTask: Task<Void, Never>?
+    private var accessibilityMonitor: Timer?
+    private var hadAccessibility = false
 
     init() {
         do {
@@ -60,10 +66,12 @@ final class AppModel: ObservableObject {
         } catch {
             core = nil
             spaces = SpacesModel(core: nil)
+            windowManager = WindowManagerModel(core: nil)
             startupError = error.localizedDescription
             return
         }
         spaces = SpacesModel(core: core)
+        windowManager = WindowManagerModel(core: core)
         spaces.onError = { [weak self] message in self?.errorMessage = message }
         reloadWorkflows()
         reloadRuns()
@@ -72,6 +80,7 @@ final class AppModel: ObservableObject {
         listenForEvents()
         installConfirmationHandler()
         Task { await refreshPermissions() }
+        monitorAccessibility()
     }
 
     var registry: ActionRegistry? { core?.registry }
@@ -184,6 +193,32 @@ final class AppModel: ObservableObject {
         Task {
             _ = await core.permissions.request(permission)
             await refreshPermissions()
+        }
+    }
+
+    /// Notices Accessibility being turned off (or on) while ATLAS runs.
+    /// Runs in progress already fail cleanly on their own; this keeps the
+    /// UI honest and tells the user why window control stopped.
+    private func monitorAccessibility() {
+        guard let core else { return }
+        hadAccessibility = core.windows.adapter.isTrusted
+        accessibilityMonitor = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkAccessibility() }
+        }
+        accessibilityMonitor?.tolerance = 1
+    }
+
+    private func checkAccessibility() {
+        guard let core else { return }
+        let trusted = core.windows.adapter.isTrusted
+        guard trusted != hadAccessibility else { return }
+        hadAccessibility = trusted
+        if !trusted {
+            errorMessage = "Accessibility permission was turned off, so ATLAS can't arrange windows. Apps still open when you activate a Space. Turn it back on in System Settings to restore window layouts."
+        }
+        Task {
+            await refreshPermissions()
+            await windowManager.refreshDisplays()
         }
     }
 

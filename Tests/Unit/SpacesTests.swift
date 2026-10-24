@@ -9,6 +9,7 @@ struct SpacesHarness {
 
     var store: AtlasStore { base.store }
     var system: MockSystemAdapter { base.system }
+    var windows: MockWindowAdapter { base.windows }
     var core: AtlasCore { base.core }
     var library: SpaceLibrary { module.library }
     var activator: SpaceActivator { module.activator }
@@ -565,4 +566,151 @@ final class EventPayloadCollector: @unchecked Sendable {
     private var _events: [AtlasEvent] = []
     var events: [AtlasEvent] { lock.synchronized { _events } }
     func append(_ event: AtlasEvent) { lock.synchronized { _events.append(event) } }
+}
+
+// MARK: - Windows (Stage 03)
+
+final class SpaceWindowTests: XCTestCase {
+    let terminal = "com.apple.Terminal"
+    let notes = "com.apple.Notes"
+
+    private func programming(_ h: SpacesHarness) throws -> WindowLayout {
+        let layout = WindowLayout(name: "Programming", rules: [
+            WindowRule(bundleID: terminal, appName: "Terminal", preset: .leftHalf),
+            WindowRule(bundleID: notes, appName: "Notes", preset: .rightHalf),
+        ])
+        try h.store.saveWindowLayout(layout)
+        return layout
+    }
+
+    private func attach(_ layout: WindowLayout, to profile: ActivationProfile, in h: SpacesHarness) throws {
+        var profile = profile
+        profile.windowLayoutID = layout.id
+        try h.store.saveProfile(profile)
+    }
+
+    func testProfileLayoutRoundTrips() throws {
+        let h = try SpacesHarness()
+        let (_, profile, _) = try h.makeSpace("Lab", steps: [.launch(terminal)])
+        let layout = try programming(h)
+        try attach(layout, to: profile, in: h)
+
+        XCTAssertEqual(try h.store.profile(id: profile.id)?.windowLayoutID, layout.id)
+        var space = try XCTUnwrap(try h.store.spaces().first)
+        XCTAssertTrue(space.snapshotOnLeave, "On by default")
+        space.snapshotOnLeave = false
+        try h.store.saveSpace(space)
+        XCTAssertEqual(try h.store.space(id: space.id)?.snapshotOnLeave, false)
+    }
+
+    func testActivationAppliesTheLayoutAsTheLastStep() async throws {
+        let h = try SpacesHarness()
+        h.windows.addWindow(terminal, app: "Terminal", untilLaunched: true)
+        h.windows.addWindow(notes, app: "Notes", untilLaunched: true)
+        let (space, profile, _) = try h.makeSpace("Coding Lab", steps: [.launch(terminal), .launch(notes)])
+        try attach(try programming(h), to: profile, in: h)
+
+        let activation = try await h.activator.activate(spaceID: space.id)
+
+        XCTAssertEqual(activation.run.state, .succeeded, activation.run.error ?? "")
+        XCTAssertEqual(activation.run.trigger, "space.activated")
+        let last = try XCTUnwrap(activation.run.steps.last)
+        XCTAssertEqual(last.actionID, ApplyWindowLayoutAction.id)
+        XCTAssertEqual(last.label, "Arrange windows: Programming")
+        XCTAssertEqual(last.message, "Placed 2 of 2 windows")
+        XCTAssertTrue(h.windows.calls.contains("frame:Terminal:0,25,720,875"))
+        XCTAssertTrue(h.windows.calls.contains("frame:Notes:720,25,720,875"))
+        // Run History lists the placements in the activation's own record.
+        let stored = try XCTUnwrap(try h.store.run(id: activation.run.id))
+        XCTAssertNotNil(stored.steps.last?.output["details"])
+    }
+
+    func testPartialLayoutMakesTheSpacePartiallyReady() async throws {
+        let h = try SpacesHarness()
+        h.windows.addWindow(terminal, app: "Terminal", untilLaunched: true)
+        h.windows.addWindow(notes, app: "Notes", fullScreen: true, untilLaunched: true)
+        let (space, profile, _) = try h.makeSpace("Coding Lab", steps: [.launch(terminal), .launch(notes)])
+        try attach(try programming(h), to: profile, in: h)
+
+        let activation = try await h.activator.activate(spaceID: space.id)
+
+        XCTAssertEqual(activation.run.state, .partiallySucceeded)
+        guard case .partiallyReady = activation.status else { return XCTFail("Got \(activation.status)") }
+        XCTAssertTrue(activation.run.error?.contains("Couldn't move Notes") ?? false, activation.run.error ?? "")
+    }
+
+    func testActivationWorksWithoutAccessibilityButReportsTheLayoutStep() async throws {
+        let h = try SpacesHarness()
+        h.windows.trusted = false
+        let (space, profile, _) = try h.makeSpace("Coding Lab", steps: [.launch(terminal)])
+        try attach(try programming(h), to: profile, in: h)
+
+        let activation = try await h.activator.activate(spaceID: space.id)
+
+        XCTAssertEqual(h.system.calls, ["launch:com.apple.Terminal"], "Apps still open")
+        XCTAssertEqual(activation.run.steps.last?.state, .failed)
+        XCTAssertEqual(activation.run.state, .partiallySucceeded)
+        XCTAssertTrue(h.windows.mutatingCalls.isEmpty)
+    }
+
+    func testLeavingASpaceSnapshotsItAndReturningOffersRestore() async throws {
+        let h = try SpacesHarness()
+        let (coding, _, _) = try h.makeSpace("Coding", steps: [.launch(terminal)])
+        let (meeting, _, _) = try h.makeSpace("Meeting", steps: [.launch(notes)])
+        h.windows.addWindow(terminal, app: "Terminal", title: "zsh", frame: CGRect(x: 40, y: 60, width: 700, height: 500), untilLaunched: true)
+        _ = try await h.activator.activate(spaceID: coding.id)
+
+        let collected = EventPayloadCollector()
+        h.core.events.subscribe("space.deactivated") { collected.append($0) }
+        let toMeeting = try await h.activator.activate(spaceID: meeting.id)
+
+        let leave = try XCTUnwrap(toMeeting.leaveSnapshotID)
+        let snapshot = try XCTUnwrap(try h.store.snapshot(id: leave))
+        XCTAssertEqual(snapshot.spaceID, coding.id)
+        XCTAssertTrue(snapshot.isAutomatic)
+        XCTAssertEqual(snapshot.rules.map(\.bundleID), [terminal])
+        XCTAssertEqual(collected.events.first?.payload["snapshotId"], .string(leave.uuidString))
+        XCTAssertNil(toMeeting.restorableSnapshot, "Meeting was never left")
+
+        // The meeting moves Terminal; coming back offers to put it back.
+        let listed = try await h.windows.windows(bundleIDs: [terminal])
+        let windowID = try XCTUnwrap(listed.first?.id)
+        _ = try await h.windows.setFrame(CGRect(x: 900, y: 500, width: 300, height: 200), of: windowID)
+        let back = try await h.activator.activate(spaceID: coding.id)
+        XCTAssertEqual(back.restorableSnapshot?.id, leave)
+
+        let restore = await h.activator.restoreWhereLeftOff(snapshotID: leave)
+        XCTAssertEqual(restore.trigger, "space.restore")
+        XCTAssertEqual(restore.state, .succeeded, restore.error ?? "")
+        XCTAssertEqual(h.windows.frame(of: windowID), CGRect(x: 40, y: 60, width: 700, height: 500))
+    }
+
+    func testSnapshotOnLeaveCanBeTurnedOff() async throws {
+        let h = try SpacesHarness()
+        var (coding, _, _) = try h.makeSpace("Coding", steps: [.launch(terminal)])
+        coding.snapshotOnLeave = false
+        try h.store.saveSpace(coding)
+        let (meeting, _, _) = try h.makeSpace("Meeting", steps: [.launch(notes)])
+        _ = try await h.activator.activate(spaceID: coding.id)
+
+        let activation = try await h.activator.activate(spaceID: meeting.id)
+
+        XCTAssertNil(activation.leaveSnapshotID)
+        XCTAssertTrue(try h.store.snapshots().isEmpty)
+    }
+
+    func testHidePreviousAlsoHidesThePreviousLayoutsApps() async throws {
+        let h = try SpacesHarness()
+        let (coding, codingProfile, _) = try h.makeSpace("Coding", steps: [.launch(terminal)])
+        try attach(try programming(h), to: codingProfile, in: h)
+        let (music, _, _) = try h.makeSpace("Music", steps: [.launch("com.apple.Music")], transition: .hidePrevious)
+        _ = try await h.activator.activate(spaceID: coding.id)
+        h.system.markRunning(notes) // Placed by the layout, not opened by the workflow.
+
+        _ = try await h.activator.activate(spaceID: music.id)
+
+        let hidden = Set(h.system.calls.filter { $0.hasPrefix("hide:") })
+        XCTAssertEqual(hidden, ["hide:com.apple.Terminal", "hide:com.apple.Notes"])
+        XCTAssertFalse(h.system.calls.contains { $0.hasPrefix("quit:") })
+    }
 }

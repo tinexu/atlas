@@ -96,6 +96,8 @@ enum Formatting {
         case "space.activated": return "Space activated"
         case "space.transition": return "Space switch (tidying previous apps)"
         case "space.object": return "Room object"
+        case "space.restore": return "Restore where you left off"
+        case "window-manager": return "Window Manager"
         default: return trigger
         }
     }

@@ -32,7 +32,7 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
     public var explanation: String {
         switch self {
         case .accessibility:
-            return "Lets ATLAS minimize other apps' windows when you switch to a Space set to “Minimize previous”, and later move and resize windows to restore a layout (Stage 03). Hiding apps doesn't need it."
+            return "Lets ATLAS move, resize, raise and minimize other apps' windows, so activating a Space can put its windows back where you saved them. ATLAS never closes windows or quits apps. Hiding apps doesn't need it."
         case .automation:
             return "Lets ATLAS send Apple Events to a specific app, e.g. telling Terminal which folder to open. macOS asks separately for each app the first time it's needed."
         case .notifications:
@@ -40,6 +40,14 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
         case .fileAccess:
             return "ATLAS only touches files and folders you point it at. macOS asks the first time ATLAS reaches into protected places like Desktop, Documents or Downloads."
         }
+    }
+
+    /// Whether the engine may ask for this permission in the middle of a
+    /// run. Accessibility can only be granted in System Settings, so a run
+    /// fails with a clear message instead of popping the system prompt;
+    /// the Permissions screen's Request Access button shows it.
+    public var isRequestedDuringRuns: Bool {
+        self != .accessibility
     }
 
     public var systemSettingsURL: URL? {

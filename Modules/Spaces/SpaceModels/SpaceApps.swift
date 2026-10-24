@@ -30,4 +30,13 @@ public enum SpaceApps {
         }
         return result
     }
+
+    /// Apps the workflow opens plus apps its window layout places.
+    public static func bundleIDs(in workflow: Workflow, layout: WindowLayout?) -> [String] {
+        var result = bundleIDs(in: workflow)
+        for bundleID in layout?.bundleIDs ?? [] where !result.contains(bundleID) {
+            result.append(bundleID)
+        }
+        return result
+    }
 }

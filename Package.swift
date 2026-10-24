@@ -24,17 +24,18 @@ let package = Package(
             name: "AtlasSpaces",
             dependencies: ["AtlasCore"],
             path: "Modules/Spaces",
-            exclude: ["MissionControl", "WorldEditor/Rendering"],
-            sources: ["SpaceModels", "WorkspaceActivation", "WorldEditor/Model"]
+            exclude: ["MissionControl", "WorldEditor/Rendering", "WindowManager/Views", "SessionSnapshots"],
+            sources: ["SpaceModels", "WorkspaceActivation", "WorldEditor/Model", "WindowManager/Model"]
         ),
-        // Stage 02 Spaces, presentation half: the RealityKit world. It only
-        // draws and reports clicks; it never activates anything itself.
+        // Stage 02–03 Spaces, presentation half: the RealityKit world, the
+        // Spatial Window Manager and snapshots. It only draws and reports
+        // input; everything it changes goes through the engine.
         .target(
             name: "AtlasSpacesUI",
             dependencies: ["AtlasSpaces"],
             path: "Modules/Spaces",
-            exclude: ["SpaceModels", "WorkspaceActivation", "WorldEditor/Model"],
-            sources: ["MissionControl", "WorldEditor/Rendering"]
+            exclude: ["SpaceModels", "WorkspaceActivation", "WorldEditor/Model", "WindowManager/Model"],
+            sources: ["MissionControl", "WorldEditor/Rendering", "WindowManager/Views", "SessionSnapshots"]
         ),
         // Native SwiftUI shell.
         .executableTarget(

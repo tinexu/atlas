@@ -15,6 +15,9 @@ struct SpaceDetailPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header(status: status)
+                    if let snapshot = spaces.leaveSnapshots[space.id], space.id == spaces.activeSpaceID {
+                        restoreSection(snapshot)
+                    }
                     profileSection
                     appsSection
                     if let run = spaces.lastRuns[space.id] {
@@ -74,6 +77,20 @@ struct SpaceDetailPanel: View {
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
+                if let layout = spaces.layout(for: profile) {
+                    Button {
+                        model.windowManager.selectedLayoutID = layout.id
+                        model.section = .windows
+                    } label: {
+                        Label("Arranges windows: \(layout.name)", systemImage: "macwindow.on.rectangle")
+                    }
+                    .buttonStyle(.link)
+                    .font(.callout)
+                } else if profile.windowLayoutID != nil {
+                    Label("This profile's window layout was deleted.", systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
             }
         }
     }
@@ -95,6 +112,20 @@ struct SpaceDetailPanel: View {
                 Text("This profile doesn't open any apps.").font(.callout).foregroundStyle(.secondary)
             }
             ForEach(apps) { AppPresenceRow(app: $0) }
+        }
+    }
+
+    private func restoreSection(_ snapshot: SessionSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                spaces.restoreWhereLeftOff(snapshot)
+            } label: {
+                Label("Restore Where You Left Off", systemImage: "arrow.uturn.backward.square")
+            }
+            .disabled(model.isPaused)
+            Text("Windows as they were \(snapshot.createdAt.formatted(.relative(presentation: .named))). Reopens apps and puts windows back; unsaved work inside apps can't be restored.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

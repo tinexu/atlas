@@ -11,11 +11,14 @@ public final class AtlasCore: @unchecked Sendable {
     public let permissions: PermissionManager
     public let system: SystemAdapter
     public let engine: AutomationEngine
+    /// Window layouts and session snapshots (Stage 03).
+    public let windows: WindowService
 
     public init(
         store: AtlasStore,
         system: SystemAdapter,
         permissionProvider: PermissionProvider,
+        windowAdapter: WindowAdapter = UnavailableWindowAdapter(),
         registry: ActionRegistry = .standard(),
         events: EventBus = EventBus()
     ) {
@@ -32,6 +35,21 @@ public final class AtlasCore: @unchecked Sendable {
             events: events,
             store: store
         )
+        self.windows = WindowService(
+            adapter: windowAdapter,
+            store: store,
+            system: system,
+            events: events,
+            registry: registry,
+            permissions: permissions
+        )
+        for action in WindowActions.all(service: windows) {
+            do {
+                try registry.register(action)
+            } catch {
+                AtlasLog.engine.error("Couldn't register \(action.descriptor.id.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     #if os(macOS)
@@ -40,8 +58,14 @@ public final class AtlasCore: @unchecked Sendable {
         let store = try AtlasStore.live()
         try store.closeInterruptedRuns()
         try store.pruneRuns(keepingLatest: 1_000)
-        let core = AtlasCore(store: store, system: MacSystemAdapter(), permissionProvider: MacPermissionProvider())
+        let core = AtlasCore(
+            store: store,
+            system: MacSystemAdapter(),
+            permissionProvider: MacPermissionProvider(),
+            windowAdapter: MacWindowAdapter()
+        )
         try core.seedSampleWorkflowsIfNeeded()
+        core.windows.startObservingDisplays()
         return core
     }
     #endif

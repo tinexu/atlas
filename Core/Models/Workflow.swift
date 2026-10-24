@@ -202,8 +202,10 @@ public struct WorkflowRun: Identifiable, Hashable, Sendable {
 
     public var summaryLine: String {
         let done = steps.filter { $0.state == .succeeded }.count
+        let partial = steps.filter { $0.state == .partiallySucceeded }.count
         let failed = steps.filter { $0.state == .failed }.count
         var parts = ["\(done)/\(steps.count) steps succeeded"]
+        if partial > 0 { parts.append("\(partial) partly done") }
         if failed > 0 { parts.append("\(failed) failed") }
         return parts.joined(separator: " · ")
     }

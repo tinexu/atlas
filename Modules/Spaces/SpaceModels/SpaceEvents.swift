@@ -20,4 +20,6 @@ public enum SpaceTrigger {
     public static let transition = "space.transition"
     /// A clicked room object.
     public static let object = "space.object"
+    /// "Restore where you left off" after returning to a Space.
+    public static let restore = "space.restore"
 }

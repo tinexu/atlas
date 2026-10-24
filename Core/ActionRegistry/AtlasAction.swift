@@ -26,6 +26,9 @@ public enum ActionError: Error, LocalizedError, Equatable, Sendable {
         case .disabledByUser(let id):
             return "“\(id)” is turned off in the Action Library."
         case .permissionDenied(let permission, let status):
+            if status == .notDetermined {
+                return "ATLAS doesn't have \(permission.title) permission yet. Grant it on the Permissions screen, then try again."
+            }
             return "\(permission.title) permission is \(status.title.lowercased()). Grant it on the Permissions screen."
         case .confirmationDeclined:
             return "You declined this step."
@@ -41,10 +44,15 @@ public enum ActionError: Error, LocalizedError, Equatable, Sendable {
 public struct ActionOutput: Sendable, Equatable {
     public var message: String
     public var values: ActionParameters
+    /// Set when only part of the work got done, e.g. "Placed 4 of 5
+    /// windows". The step is then recorded as partially succeeded, with
+    /// this as its error, instead of claiming full success.
+    public var partialFailure: String?
 
-    public init(_ message: String, values: ActionParameters = [:]) {
+    public init(_ message: String, values: ActionParameters = [:], partialFailure: String? = nil) {
         self.message = message
         self.values = values
+        self.partialFailure = partialFailure
     }
 }
 

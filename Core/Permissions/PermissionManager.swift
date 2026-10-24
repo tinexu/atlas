@@ -59,12 +59,13 @@ public final class PermissionManager: @unchecked Sendable {
     }
 
     /// Throws unless the action is switched on and every permission it
-    /// declares is usable. Undetermined permissions are requested once.
+    /// declares is usable. Undetermined permissions are requested once,
+    /// except ones that can only be granted in System Settings.
     public func authorize(_ descriptor: ActionDescriptor) async throws {
         guard isEnabled(descriptor.id) else { throw ActionError.disabledByUser(descriptor.id) }
         for permission in descriptor.permissions.sorted(by: { $0.rawValue < $1.rawValue }) {
             var status = await provider.status(of: permission)
-            if status == .notDetermined {
+            if status == .notDetermined, permission.isRequestedDuringRuns {
                 status = await request(permission)
             }
             guard status.allowsUse else { throw ActionError.permissionDenied(permission, status) }

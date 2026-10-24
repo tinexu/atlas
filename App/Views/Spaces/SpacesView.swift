@@ -54,6 +54,11 @@ struct SpacesView: View {
                 SpacesListView()
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let offer = spaces.restoreOffer, let space = spaces.space(id: offer.spaceID) {
+                RestoreOfferBanner(spaceName: space.name, snapshot: offer.snapshot)
+            }
+        }
         .navigationTitle("Spaces")
         .toolbar {
             ToolbarItem {
@@ -100,5 +105,33 @@ struct SpacesView: View {
         } message: { _ in
             Text("Its room and profiles are removed. Its automations stay under Automations unless you delete them too. Automations another Space uses are always kept.")
         }
+    }
+}
+
+/// "Restore where you left off" after coming back to a Space.
+private struct RestoreOfferBanner: View {
+    @EnvironmentObject private var spaces: SpacesModel
+    let spaceName: String
+    let snapshot: SessionSnapshot
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.uturn.backward.square.fill")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pick up where you left off in \(spaceName)?").fontWeight(.medium)
+                Text("Puts \(snapshot.rules.count) window\(snapshot.rules.count == 1 ? "" : "s") back and reopens apps. Unsaved work inside apps can't be restored.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Not Now") { spaces.restoreOffer = nil }
+            Button("Restore") { spaces.restoreWhereLeftOff(snapshot) }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(12)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 }

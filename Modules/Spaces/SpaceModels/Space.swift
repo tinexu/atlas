@@ -60,6 +60,9 @@ public struct Space: Identifiable, Hashable, Codable, Sendable {
     public var transitionBehavior: TransitionBehavior
     /// Pinned Spaces come first within their group.
     public var isPinned: Bool
+    /// Save a snapshot of the windows when switching away, so returning can
+    /// offer "Restore where you left off".
+    public var snapshotOnLeave: Bool
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -72,6 +75,7 @@ public struct Space: Identifiable, Hashable, Codable, Sendable {
         slot: Int = 0,
         transitionBehavior: TransitionBehavior = .leaveRunning,
         isPinned: Bool = false,
+        snapshotOnLeave: Bool = true,
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
@@ -83,6 +87,7 @@ public struct Space: Identifiable, Hashable, Codable, Sendable {
         self.slot = slot
         self.transitionBehavior = transitionBehavior
         self.isPinned = isPinned
+        self.snapshotOnLeave = snapshotOnLeave
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -95,6 +100,8 @@ public struct ActivationProfile: Identifiable, Hashable, Codable, Sendable {
     public var spaceID: UUID
     public var name: String
     public var workflowID: UUID
+    /// Applied as the activation's last step, after the workflow's apps open.
+    public var windowLayoutID: UUID?
     public var isDefault: Bool
     public var position: Int
 
@@ -103,6 +110,7 @@ public struct ActivationProfile: Identifiable, Hashable, Codable, Sendable {
         spaceID: UUID,
         name: String,
         workflowID: UUID,
+        windowLayoutID: UUID? = nil,
         isDefault: Bool = false,
         position: Int = 0
     ) {
@@ -110,6 +118,7 @@ public struct ActivationProfile: Identifiable, Hashable, Codable, Sendable {
         self.spaceID = spaceID
         self.name = name
         self.workflowID = workflowID
+        self.windowLayoutID = windowLayoutID
         self.isDefault = isDefault
         self.position = position
     }

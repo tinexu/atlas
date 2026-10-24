@@ -111,8 +111,21 @@ private struct RunDetail: View {
                     Text("Steps").font(.headline)
                     ForEach(run.steps) { step in
                         StepResultRow(step: step)
-                        if !step.output.isEmpty {
-                            Text(step.output.sorted { $0.key < $1.key }
+                        // Per-window results and similar lists, one per line.
+                        if let details = step.output["details"]?.stringValue, !details.isEmpty {
+                            VStack(alignment: .leading, spacing: 3) {
+                                ForEach(Array(details.split(separator: "\n").enumerated()), id: \.offset) { _, line in
+                                    Label(String(line), systemImage: line.hasPrefix("Couldn't") ? "xmark.circle" : "checkmark.circle")
+                                        .foregroundStyle(line.hasPrefix("Couldn't") ? Color.orange : Color.secondary)
+                                }
+                            }
+                            .font(.callout)
+                            .padding(.leading, 24)
+                            .textSelection(.enabled)
+                        }
+                        let values = step.output.filter { $0.key != "details" }
+                        if !values.isEmpty {
+                            Text(values.sorted { $0.key < $1.key }
                                 .map { "\($0.key): \($0.value.displayString)" }
                                 .joined(separator: "   "))
                                 .font(.caption.monospaced())

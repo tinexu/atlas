@@ -1,4 +1,5 @@
 import AtlasCore
+import AtlasSpacesUI
 import SwiftUI
 
 struct RootView: View {
@@ -21,6 +22,12 @@ struct RootView: View {
             } detail: {
                 switch model.section {
                 case .spaces: SpacesView()
+                case .windows:
+                    WindowManagerView(
+                        model: model.windowManager,
+                        spaceName: { id in model.spaces.space(id: id)?.name },
+                        openPermissions: { model.section = .permissions }
+                    )
                 case .automations: AutomationsView()
                 case .history: RunHistoryView()
                 case .actions: ActionLibraryView()

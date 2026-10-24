@@ -33,6 +33,8 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
     public let defaultValue: ActionValue?
     public let minimum: Double?
     public let maximum: Double?
+    /// For text parameters: the accepted values, shown as a menu.
+    public let options: [String]?
 
     public init(
         key: String,
@@ -42,7 +44,8 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
         help: String? = nil,
         defaultValue: ActionValue? = nil,
         minimum: Double? = nil,
-        maximum: Double? = nil
+        maximum: Double? = nil,
+        options: [String]? = nil
     ) {
         self.key = key
         self.label = label
@@ -52,6 +55,7 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
         self.defaultValue = defaultValue
         self.minimum = minimum
         self.maximum = maximum
+        self.options = options
     }
 }
 
@@ -60,6 +64,7 @@ public enum SideEffect: String, Codable, CaseIterable, Sendable {
     case launchesApplication
     case terminatesApplication
     case hidesApplication
+    case arrangesWindows
     case opensURL
     case opensDocument
     case showsUI
@@ -72,6 +77,7 @@ public enum SideEffect: String, Codable, CaseIterable, Sendable {
         case .launchesApplication: return "Launches apps"
         case .terminatesApplication: return "Quits apps"
         case .hidesApplication: return "Hides apps"
+        case .arrangesWindows: return "Moves and resizes windows"
         case .opensURL: return "Opens links"
         case .opensDocument: return "Opens documents"
         case .showsUI: return "Shows Finder windows"

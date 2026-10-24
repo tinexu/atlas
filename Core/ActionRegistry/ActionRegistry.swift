@@ -113,6 +113,12 @@ public final class ActionRegistry: @unchecked Sendable {
 
         case .text:
             guard let s = value.stringValue else { throw invalid("expected text") }
+            if let options = spec.options {
+                guard let match = options.first(where: { $0.caseInsensitiveCompare(s.trimmingCharacters(in: .whitespaces)) == .orderedSame }) else {
+                    throw invalid("expected one of \(options.joined(separator: ", "))")
+                }
+                return .string(match)
+            }
             return .string(s)
         }
     }

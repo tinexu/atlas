@@ -223,21 +223,22 @@ public actor AutomationEngine {
             }
         }
 
-        let ran = run.steps.filter { $0.state == .succeeded || $0.state == .failed }
+        let ran = run.steps.filter { $0.state == .succeeded || $0.state == .partiallySucceeded || $0.state == .failed }
         let failures = ran.filter { $0.state == .failed }
+        let partials = ran.filter { $0.state == .partiallySucceeded }
         let state: RunState
         if wasCanceled {
             state = .canceled
         } else if ran.isEmpty {
             state = .skipped
-        } else if failures.isEmpty {
+        } else if failures.isEmpty && partials.isEmpty {
             state = .succeeded
         } else if failures.count < ran.count {
             state = .partiallySucceeded
         } else {
             state = .failed
         }
-        let firstError = failures.first.map { "\($0.label): \($0.error ?? "failed")" }
+        let firstError = (failures.first ?? partials.first).map { "\($0.label): \($0.error ?? "failed")" }
         return finish(&run, state: state, error: wasCanceled ? "Run was canceled." : firstError)
     }
 
@@ -293,7 +294,13 @@ public actor AutomationEngine {
                 let output = try await withTimeout(seconds: timeout) {
                     try await action.perform(parameters, context: context)
                 }
-                return StepOutcome(state: .succeeded, attempts: attempt, message: output.message, output: output.values)
+                return StepOutcome(
+                    state: output.partialFailure == nil ? .succeeded : .partiallySucceeded,
+                    attempts: attempt,
+                    message: output.message,
+                    error: output.partialFailure,
+                    output: output.values
+                )
             } catch is CancellationError {
                 return StepOutcome(state: .canceled, attempts: attempt, message: "Run was canceled.")
             } catch {

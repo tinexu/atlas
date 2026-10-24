@@ -34,6 +34,17 @@ final class SpacesModel: ObservableObject {
     /// spaceID → its latest activation run.
     @Published private(set) var lastRuns: [UUID: WorkflowRun] = [:]
     @Published private(set) var runningBundleIDs: Set<String> = []
+    /// Window layouts by ID, for profile pickers and app lists.
+    @Published private(set) var layouts: [UUID: WindowLayout] = [:]
+    /// spaceID → the snapshot saved when it was last left.
+    @Published private(set) var leaveSnapshots: [UUID: SessionSnapshot] = [:]
+    /// Shown after returning to a Space that was left with windows open.
+    @Published var restoreOffer: RestoreOffer?
+
+    struct RestoreOffer: Equatable {
+        let spaceID: UUID
+        let snapshot: SessionSnapshot
+    }
 
     @Published var selectedSpaceID: UUID?
     /// The profile picked in the UI per Space; falls back to the default.
@@ -121,6 +132,14 @@ final class SpacesModel: ObservableObject {
         )
     }
 
+    var sortedLayouts: [WindowLayout] {
+        layouts.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func layout(for profile: ActivationProfile?) -> WindowLayout? {
+        profile?.windowLayoutID.flatMap { layouts[$0] }
+    }
+
     func template(for space: Space) -> SpaceTemplate {
         SpaceTemplates.template(id: space.templateID) ?? SpaceTemplates.fallback
     }
@@ -130,7 +149,7 @@ final class SpacesModel: ObservableObject {
         guard let profile = profile ?? selectedProfile(for: spaceID),
               let workflow = workflows[profile.workflowID]
         else { return [] }
-        return SpaceApps.bundleIDs(in: workflow).map { bundleID in
+        return SpaceApps.bundleIDs(in: workflow, layout: layout(for: profile)).map { bundleID in
             AppPresence(
                 bundleID: bundleID,
                 name: core?.system.applicationName(for: bundleID) ?? bundleID,
@@ -192,6 +211,19 @@ final class SpacesModel: ObservableObject {
             // A run that never reached the activator (e.g. paused) leaves no
             // space.activated event behind to clear the flag.
             if run.state == .skipped { activating.remove(spaceID) }
+        }
+    }
+
+    /// Puts the Space's windows back where they were when it was left.
+    /// Runs through the engine, so it shows in Run History.
+    func restoreWhereLeftOff(_ snapshot: SessionSnapshot) {
+        guard let activator = module?.activator else { return }
+        if restoreOffer?.snapshot.id == snapshot.id { restoreOffer = nil }
+        Task {
+            let run = await activator.restoreWhereLeftOff(snapshotID: snapshot.id)
+            if run.state == .failed || run.state == .skipped {
+                onError?(run.error ?? "Couldn't restore “\(snapshot.name)”.")
+            }
         }
     }
 
@@ -333,6 +365,12 @@ final class SpacesModel: ObservableObject {
             profiles = Dictionary(grouping: try store.profiles(), by: \.spaceID)
             objects = Dictionary(grouping: try store.spaceObjects(), by: \.spaceID)
             workflows = Dictionary(uniqueKeysWithValues: try store.workflows().map { ($0.id, $0) })
+            layouts = Dictionary(uniqueKeysWithValues: try store.windowLayouts().map { ($0.id, $0) })
+            var leaves: [UUID: SessionSnapshot] = [:]
+            for snapshot in try store.snapshots(limit: 200) where snapshot.isAutomatic {
+                if let spaceID = snapshot.spaceID, leaves[spaceID] == nil { leaves[spaceID] = snapshot }
+            }
+            leaveSnapshots = leaves
             activeSpaceID = try store.activeSpaceID()
             var runs: [UUID: WorkflowRun] = [:]
             for space in spaces {
@@ -370,13 +408,21 @@ final class SpacesModel: ObservableObject {
         switch event.name {
         case AtlasEvent.Name.spaceActivating:
             if let spaceID { activating.insert(spaceID) }
+            if restoreOffer?.spaceID != spaceID { restoreOffer = nil }
             activeSpaceID = spaceID
         case AtlasEvent.Name.spaceActivated:
             if let spaceID { activating.remove(spaceID) }
             reload()
             refreshRunningApps()
+            if let spaceID,
+               let snapshotID = event.payload["restorableSnapshotId"]?.stringValue.flatMap(UUID.init(uuidString:)),
+               let snapshot = try? core?.store.snapshot(id: snapshotID) {
+                restoreOffer = RestoreOffer(spaceID: spaceID, snapshot: snapshot)
+            }
         case AtlasEvent.Name.spaceSaved, AtlasEvent.Name.spaceDeleted,
-             AtlasEvent.Name.workflowSaved, AtlasEvent.Name.workflowDeleted:
+             AtlasEvent.Name.workflowSaved, AtlasEvent.Name.workflowDeleted,
+             AtlasEvent.Name.windowLayoutSaved, AtlasEvent.Name.windowLayoutDeleted,
+             AtlasEvent.Name.snapshotSaved:
             reload()
         case AtlasEvent.Name.workflowFinished:
             refreshRunningApps()

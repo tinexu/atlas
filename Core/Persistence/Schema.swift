@@ -109,6 +109,50 @@ enum Schema {
         );
         CREATE INDEX idx_space_object_space ON space_object(space_id);
         """,
+
+        // v3 — Stage 03: window layouts and session snapshots. Layout rules
+        // get their own rows so they can be edited one at a time; a
+        // snapshot's rules are a frozen record, kept as JSON.
+        """
+        CREATE TABLE window_layout (
+            id                    TEXT PRIMARY KEY,
+            name                  TEXT NOT NULL,
+            display_profile_json  TEXT,
+            created_at            REAL NOT NULL,
+            updated_at            REAL NOT NULL
+        );
+
+        CREATE TABLE window_rule (
+            id                TEXT PRIMARY KEY,
+            layout_id         TEXT NOT NULL REFERENCES window_layout(id) ON DELETE CASCADE,
+            position          INTEGER NOT NULL,
+            bundle_id         TEXT NOT NULL,
+            app_name          TEXT NOT NULL DEFAULT '',
+            title_match_json  TEXT,
+            display_json      TEXT NOT NULL,
+            frame_json        TEXT NOT NULL,
+            state             TEXT NOT NULL DEFAULT 'normal',
+            z_order           INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_window_rule_layout ON window_rule(layout_id, position);
+
+        CREATE TABLE session_snapshot (
+            id                    TEXT PRIMARY KEY,
+            name                  TEXT NOT NULL,
+            created_at            REAL NOT NULL,
+            space_id              TEXT,
+            is_automatic          INTEGER NOT NULL DEFAULT 0,
+            running_apps_json     TEXT NOT NULL DEFAULT '[]',
+            rules_json            TEXT NOT NULL DEFAULT '[]',
+            display_profile_json  TEXT
+        );
+        CREATE INDEX idx_session_snapshot_space ON session_snapshot(space_id, created_at DESC);
+
+        -- No foreign key: a profile whose layout was deleted just stops
+        -- arranging windows.
+        ALTER TABLE activation_profile ADD COLUMN window_layout_id TEXT;
+        ALTER TABLE space ADD COLUMN snapshot_on_leave INTEGER NOT NULL DEFAULT 1;
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

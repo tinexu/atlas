@@ -50,12 +50,16 @@ struct SpaceEditor: View {
                     Picker("When activated", selection: $draft.transitionBehavior) {
                         ForEach(TransitionBehavior.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
+                    Toggle("Remember windows when leaving this Space", isOn: $draft.snapshotOnLeave)
                 } header: {
-                    Text("Switching to this Space")
+                    Text("Switching Spaces")
                 } footer: {
-                    Text(transitionFooter)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(transitionFooter)
+                        Text("Remembering windows saves a snapshot when you switch away, so coming back offers “Restore where you left off”. It restores window positions and reopens apps, not unsaved work inside them. Needs Accessibility permission.")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 Section {
@@ -73,7 +77,7 @@ struct SpaceEditor: View {
                 } header: {
                     Text("Activation profiles")
                 } footer: {
-                    Text("Each profile runs one automation. The default runs when you activate the Space without choosing.")
+                    Text("Each profile runs one automation, then arranges windows with its layout if it has one. The default runs when you activate the Space without choosing.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -256,6 +260,7 @@ struct SpaceEditor: View {
 
 private struct ProfileRow: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var spaces: SpacesModel
     @Binding var profile: ActivationProfile
     let canRemove: Bool
     let makeDefault: () -> Void
@@ -293,6 +298,17 @@ private struct ProfileRow: View {
                 Button("New", action: newAutomation)
                     .help("Create a new automation for this profile")
             }
+            Picker("Window layout", selection: $profile.windowLayoutID) {
+                Text("Don't arrange windows").tag(UUID?.none)
+                if let id = profile.windowLayoutID, spaces.layouts[id] == nil {
+                    Text("Missing layout").tag(Optional(id))
+                }
+                if !spaces.layouts.isEmpty { Divider() }
+                ForEach(spaces.sortedLayouts) { layout in
+                    Text(layout.name).tag(Optional(layout.id))
+                }
+            }
+            .help("Applied after the automation, as the activation's last step. Make layouts under Windows.")
         }
         .padding(.vertical, 4)
     }

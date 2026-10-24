@@ -13,8 +13,8 @@ extension AtlasStore {
         try database.run(
             """
             INSERT INTO space (id, name, group_name, template_id, accent_color, slot,
-                               transition_behavior, is_pinned, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               transition_behavior, is_pinned, snapshot_on_leave, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 group_name = excluded.group_name,
@@ -23,12 +23,13 @@ extension AtlasStore {
                 slot = excluded.slot,
                 transition_behavior = excluded.transition_behavior,
                 is_pinned = excluded.is_pinned,
+                snapshot_on_leave = excluded.snapshot_on_leave,
                 updated_at = excluded.updated_at;
             """,
             [
                 .from(space.id), .text(space.name), .text(space.group.rawValue), .text(space.templateID),
                 .text(space.accentColor), .from(space.slot), .text(space.transitionBehavior.rawValue),
-                .from(space.isPinned), .from(space.createdAt), .from(space.updatedAt),
+                .from(space.isPinned), .from(space.snapshotOnLeave), .from(space.createdAt), .from(space.updatedAt),
             ]
         )
     }
@@ -65,6 +66,7 @@ extension AtlasStore {
             slot: row.int("slot") ?? 0,
             transitionBehavior: row.string("transition_behavior").flatMap(TransitionBehavior.init(rawValue:)) ?? .leaveRunning,
             isPinned: row.bool("is_pinned") ?? false,
+            snapshotOnLeave: row.bool("snapshot_on_leave") ?? true,
             createdAt: row.date("created_at") ?? Date(),
             updatedAt: row.date("updated_at") ?? Date()
         )
@@ -75,18 +77,19 @@ extension AtlasStore {
     public func saveProfile(_ profile: ActivationProfile) throws {
         try database.run(
             """
-            INSERT INTO activation_profile (id, space_id, position, name, workflow_id, is_default)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO activation_profile (id, space_id, position, name, workflow_id, window_layout_id, is_default)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 space_id = excluded.space_id,
                 position = excluded.position,
                 name = excluded.name,
                 workflow_id = excluded.workflow_id,
+                window_layout_id = excluded.window_layout_id,
                 is_default = excluded.is_default;
             """,
             [
                 .from(profile.id), .from(profile.spaceID), .from(profile.position), .text(profile.name),
-                .from(profile.workflowID), .from(profile.isDefault),
+                .from(profile.workflowID), profile.windowLayoutID.map(SQLValue.from) ?? .null, .from(profile.isDefault),
             ]
         )
     }
@@ -111,6 +114,7 @@ extension AtlasStore {
                 spaceID: spaceID,
                 name: row.string("name") ?? "Default",
                 workflowID: workflowID,
+                windowLayoutID: row.uuid("window_layout_id"),
                 isDefault: row.bool("is_default") ?? false,
                 position: row.int("position") ?? 0
             )
