@@ -98,7 +98,7 @@ public actor SpaceActivator {
         let layout = try profile.windowLayoutID.flatMap { try store.windowLayout(id: $0) }
         if let layout {
             // Last, so the workflow's apps are open by the time windows move.
-            workflow.steps.append(WorkflowStep(
+            workflow.appendStep(WorkflowStep(
                 actionID: ApplyWindowLayoutAction.id,
                 parameters: ["layout": .string(layout.id.uuidString)],
                 label: "Arrange windows: \(layout.name)"

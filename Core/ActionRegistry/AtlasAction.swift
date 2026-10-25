@@ -69,6 +69,26 @@ public struct ActionContext: Sendable {
     }
 }
 
+/// Something an action changed that a trigger might notice, e.g. a file it
+/// moved into a watched folder. Lets `TriggerManager` tell a workflow
+/// setting itself off apart from genuine outside events.
+public enum ActionEffect: String, Sendable {
+    case file, app
+}
+
+extension AtlasEvent.Name {
+    /// Payload: kind ("file"/"app"), value (path or bundle ID), runId.
+    public static let actionEffect = "atlas.effect"
+}
+
+extension ActionContext {
+    public func reportEffect(_ kind: ActionEffect, _ value: String) {
+        var payload: ActionParameters = ["kind": .string(kind.rawValue), "value": .string(value)]
+        if let runID { payload["runId"] = .string(runID.uuidString) }
+        events.publish(AtlasEvent(AtlasEvent.Name.actionEffect, payload: payload))
+    }
+}
+
 /// An operation ATLAS can perform. Implementations receive parameters that
 /// the registry has already validated and filled with defaults.
 public protocol AtlasAction: Sendable {

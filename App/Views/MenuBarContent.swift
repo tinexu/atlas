@@ -33,7 +33,7 @@ struct MenuBarContent: View {
                         Button("Stop \(workflow.name)") { model.cancelRun(for: workflow.id) }
                     } else {
                         Button(workflow.name) { model.run(workflow, trigger: "menu-bar") }
-                            .disabled(model.isPaused || workflow.steps.isEmpty)
+                            .disabled(model.isPaused || workflow.steps.isEmpty || workflow.hasTriggers && workflow.steps.count == 1)
                     }
                 }
             }
@@ -44,6 +44,13 @@ struct MenuBarContent: View {
         Toggle("Pause Automations", isOn: Binding(
             get: { model.isPaused },
             set: { model.setPaused($0) }
+        ))
+        if let triggers = model.core?.triggers, !model.isPaused {
+            Text(triggers.activeTriggerCount == 1 ? "1 trigger listening" : "\(triggers.activeTriggerCount) triggers listening")
+        }
+        Toggle("Start ATLAS at Login", isOn: Binding(
+            get: { model.launchesAtLogin },
+            set: { model.setLaunchesAtLogin($0) }
         ))
 
         Divider()

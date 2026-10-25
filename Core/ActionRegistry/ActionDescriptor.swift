@@ -35,6 +35,10 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
     public let maximum: Double?
     /// For text parameters: the accepted values, shown as a menu.
     public let options: [String]?
+    /// For text parameters: a named list the editor offers as a menu, e.g.
+    /// "spaces". Unlike `options`, any value is still accepted, so a name
+    /// typed by hand or a `{{placeholder}}` works too.
+    public let choicesFrom: String?
 
     public init(
         key: String,
@@ -45,7 +49,8 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
         defaultValue: ActionValue? = nil,
         minimum: Double? = nil,
         maximum: Double? = nil,
-        options: [String]? = nil
+        options: [String]? = nil,
+        choicesFrom: String? = nil
     ) {
         self.key = key
         self.label = label
@@ -56,7 +61,25 @@ public struct ParameterSpec: Codable, Hashable, Sendable {
         self.minimum = minimum
         self.maximum = maximum
         self.options = options
+        self.choicesFrom = choicesFrom
     }
+}
+
+/// A value an action reports when it finishes, which later nodes can use
+/// (Stage 04 data connections and `{{node.<label>.<key>}}` templates).
+public struct OutputSpec: Codable, Hashable, Sendable {
+    public let key: String
+    public let label: String
+    public let type: PortType
+
+    public init(key: String, label: String, type: PortType) {
+        self.key = key
+        self.label = label
+        self.type = type
+    }
+
+    /// Every action reports its result message.
+    public static let message = OutputSpec(key: "message", label: "Result", type: .string)
 }
 
 /// Observable consequences of running an action (spec 5.5).
@@ -106,6 +129,10 @@ public struct ActionDescriptor: Codable, Hashable, Sendable, Identifiable {
     /// cause irreversible changes (spec 5.7).
     public let isIdempotent: Bool
     public let defaultTimeout: TimeInterval
+    /// Values later nodes can use. The result message is always available.
+    public let outputs: [OutputSpec]
+    /// Safe to run at the same time as other actions in a Parallel node.
+    public let isConcurrencySafe: Bool
 
     public init(
         id: ActionID,
@@ -118,7 +145,9 @@ public struct ActionDescriptor: Codable, Hashable, Sendable, Identifiable {
         sideEffects: Set<SideEffect> = [],
         confirmationRequired: Bool = false,
         isIdempotent: Bool = false,
-        defaultTimeout: TimeInterval = 30
+        defaultTimeout: TimeInterval = 30,
+        outputs: [OutputSpec] = [],
+        isConcurrencySafe: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -131,5 +160,12 @@ public struct ActionDescriptor: Codable, Hashable, Sendable, Identifiable {
         self.confirmationRequired = confirmationRequired
         self.isIdempotent = isIdempotent
         self.defaultTimeout = defaultTimeout
+        self.outputs = outputs
+        self.isConcurrencySafe = isConcurrencySafe
+    }
+
+    /// Declared outputs plus the result message.
+    public var allOutputs: [OutputSpec] {
+        outputs.contains { $0.key == OutputSpec.message.key } ? outputs : outputs + [.message]
     }
 }

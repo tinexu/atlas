@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import IOKit.ps
 import UserNotifications
 
 /// Live macOS implementation backed by NSWorkspace and UserNotifications.
@@ -161,6 +162,32 @@ public struct MacSystemAdapter: SystemAdapter {
         return isDirectory.boolValue ? .directory : .file
     }
 
+    public func fileSize(atPath path: String) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
+    }
+
+    public func moveItem(atPath path: String, toPath destination: String) async throws {
+        try FileManager.default.moveItem(atPath: path, toPath: destination)
+    }
+
+    public func copyItem(atPath path: String, toPath destination: String) async throws {
+        try FileManager.default.copyItem(atPath: path, toPath: destination)
+    }
+
+    public func createFolder(atPath path: String) async throws {
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+    }
+
+    public func trashItem(atPath path: String) async throws -> String {
+        var resulting: NSURL?
+        try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: &resulting)
+        return resulting?.path ?? path
+    }
+
+    public func powerStatus() -> PowerStatus? {
+        PowerSources.current()
+    }
+
     public func applicationName(for bundleID: String) -> String? {
         guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
         return FileManager.default.displayName(atPath: url.path)
@@ -179,6 +206,28 @@ public struct MacSystemAdapter: SystemAdapter {
                     isActive: app.isActive
                 )
             }
+    }
+}
+/// Reads battery and power adapter state from IOKit.
+enum PowerSources {
+    static func current() -> PowerStatus? {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let list = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef]
+        else { return nil }
+        let adapter = (IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String?) == kIOPMACPowerKey
+        for source in list {
+            guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any],
+                  (description[kIOPSTypeKey] as? String) == kIOPSInternalBatteryType,
+                  let current = description[kIOPSCurrentCapacityKey] as? Int,
+                  let maximum = description[kIOPSMaxCapacityKey] as? Int, maximum > 0
+            else { continue }
+            return PowerStatus(
+                batteryPercent: Int((Double(current) / Double(maximum) * 100).rounded()),
+                isOnAdapter: adapter,
+                isCharging: description[kIOPSIsChargingKey] as? Bool ?? false
+            )
+        }
+        return nil
     }
 }
 #endif

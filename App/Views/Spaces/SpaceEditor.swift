@@ -2,6 +2,7 @@ import AppKit
 import AtlasCore
 import AtlasSpaces
 import AtlasSpacesUI
+import AtlasFlow
 import SwiftUI
 
 /// Form editor for a Space: identity, look, transition and profiles. Each
@@ -323,8 +324,13 @@ struct WorkflowEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            WorkflowEditor(original: model.workflow(id: workflow.id) ?? workflow)
-                .id(workflow.id)
+            let current = model.workflow(id: workflow.id) ?? workflow
+            if current.isLinear {
+                WorkflowEditor(original: current)
+                    .id(workflow.id)
+            } else if let editor = model.editor(for: current) {
+                FlowEditorView(model: editor)
+            }
             Divider()
             HStack {
                 Text("Save your changes before closing.")
@@ -336,6 +342,6 @@ struct WorkflowEditorSheet: View {
             }
             .padding(12)
         }
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 560, idealHeight: 680)
+        .frame(minWidth: 900, idealWidth: 1100, minHeight: 600, idealHeight: 720)
     }
 }

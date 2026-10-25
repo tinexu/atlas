@@ -111,16 +111,8 @@ public final class SpaceLibrary: @unchecked Sendable {
             try store.saveSpace(copy)
             for profile in try store.profiles(spaceID: original.id) {
                 var workflowID = profile.workflowID
-                if var workflow = try store.workflow(id: profile.workflowID) {
-                    workflow.id = UUID()
-                    workflow.name = "\(copy.name) · \(profile.name)"
-                    workflow.createdAt = Date()
-                    workflow.steps = workflow.steps.map { step in
-                        var step = step
-                        step.id = UUID()
-                        return step
-                    }
-                    workflowID = try core.save(workflow).id
+                if let workflow = try store.workflow(id: profile.workflowID) {
+                    workflowID = try core.save(workflow.duplicate(named: "\(copy.name) · \(profile.name)")).id
                 }
                 var newProfile = profile
                 newProfile.id = UUID()

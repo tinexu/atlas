@@ -23,9 +23,9 @@ public struct SpaceActivateAction: AtlasAction {
         symbolName: "cube.transparent",
         parameters: [
             ParameterSpec(key: "space", label: "Space", kind: .text,
-                          help: "Name of the Space, e.g. Coding Lab"),
+                          help: "Name of the Space, e.g. Coding Lab", choicesFrom: SpaceParameterChoices.spaces),
             ParameterSpec(key: "profile", label: "Profile", kind: .text, isRequired: false,
-                          help: "Leave empty for the Space's default profile"),
+                          help: "Leave empty for the Space's default profile", choicesFrom: SpaceParameterChoices.profiles),
         ],
         sideEffects: [.launchesApplication],
         // Activating an active Space again only brings its apps forward.

@@ -153,6 +153,60 @@ enum Schema {
         ALTER TABLE activation_profile ADD COLUMN window_layout_id TEXT;
         ALTER TABLE space ADD COLUMN snapshot_on_leave INTEGER NOT NULL DEFAULT 1;
         """,
+
+        // v4 — Stage 04: workflows become graphs. Nodes gain a kind, a
+        // position, configuration and typed ports; connections and
+        // variables get tables. Every existing step list becomes a straight
+        // chain of trigger-less nodes. Node IDs are kept, so old run history
+        // still lines up with its nodes.
+        """
+        ALTER TABLE workflow_node ADD COLUMN kind TEXT NOT NULL DEFAULT 'action';
+        ALTER TABLE workflow_node ADD COLUMN pos_x REAL NOT NULL DEFAULT 0;
+        ALTER TABLE workflow_node ADD COLUMN pos_y REAL NOT NULL DEFAULT 0;
+        ALTER TABLE workflow_node ADD COLUMN pos_z REAL NOT NULL DEFAULT 0;
+        ALTER TABLE workflow_node ADD COLUMN config_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE workflow_node ADD COLUMN ports_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE workflow_node ADD COLUMN failure_policy TEXT;
+        ALTER TABLE workflow ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';
+
+        CREATE TABLE workflow_connection (
+            id           TEXT PRIMARY KEY,
+            workflow_id  TEXT NOT NULL REFERENCES workflow(id) ON DELETE CASCADE,
+            position     INTEGER NOT NULL DEFAULT 0,
+            from_node    TEXT NOT NULL,
+            from_port    TEXT NOT NULL,
+            to_node      TEXT NOT NULL,
+            to_port      TEXT NOT NULL
+        );
+        CREATE INDEX idx_workflow_connection_workflow ON workflow_connection(workflow_id, position);
+
+        -- value_json is the remembered value of a saved variable.
+        CREATE TABLE workflow_variable (
+            workflow_id   TEXT NOT NULL REFERENCES workflow(id) ON DELETE CASCADE,
+            name          TEXT NOT NULL,
+            initial_json  TEXT NOT NULL DEFAULT 'null',
+            is_saved      INTEGER NOT NULL DEFAULT 0,
+            value_json    TEXT,
+            PRIMARY KEY (workflow_id, name)
+        );
+
+        ALTER TABLE workflow_run ADD COLUMN trigger_payload_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE workflow_run ADD COLUMN path_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE workflow_run_step ADD COLUMN inputs_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE workflow_run_step ADD COLUMN kind TEXT NOT NULL DEFAULT 'action';
+
+        -- Lay old steps out left to right and chain them in order.
+        UPDATE workflow_node SET pos_x = position * 280, pos_y = 0;
+        INSERT INTO workflow_connection (id, workflow_id, position, from_node, from_port, to_node, to_port)
+        SELECT upper(substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-' || substr(h, 13, 4) || '-' || substr(h, 17, 4) || '-' || substr(h, 21, 12)),
+               workflow_id, position, from_node, 'out', to_node, 'in'
+        FROM (
+            SELECT hex(randomblob(16)) AS h, a.workflow_id AS workflow_id, a.position AS position,
+                   a.id AS from_node, b.id AS to_node
+            FROM workflow_node a
+            JOIN workflow_node b ON b.workflow_id = a.workflow_id AND b.position = a.position + 1
+        );
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

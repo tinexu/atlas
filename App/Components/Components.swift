@@ -98,7 +98,14 @@ enum Formatting {
         case "space.object": return "Room object"
         case "space.restore": return "Restore where you left off"
         case "window-manager": return "Window Manager"
-        default: return trigger
+        case RunTrigger.test: return "Run now (test)"
+        case RunTrigger.subworkflow: return "Called by another automation"
+        default:
+            if trigger.hasPrefix(RunTrigger.automaticPrefix) {
+                let type = String(trigger.dropFirst(RunTrigger.automaticPrefix.count))
+                return "Trigger: \(TriggerCatalog.type(id: type)?.title ?? type)"
+            }
+            return trigger
         }
     }
 }

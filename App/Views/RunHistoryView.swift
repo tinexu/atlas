@@ -1,4 +1,5 @@
 import AtlasCore
+import AtlasFlow
 import SwiftUI
 
 /// Every run, newest first, with a per-step breakdown (spec 5.8).
@@ -12,6 +13,10 @@ struct RunHistoryView: View {
 
     var body: some View {
         HSplitView {
+            VStack(spacing: 0) {
+            RunFilterBar(filters: $model.runFilters, workflows: model.workflows)
+                .padding(10)
+            Divider()
             List(selection: $selectedRunID) {
                 ForEach(model.runs) { run in
                     HStack(spacing: 10) {
@@ -31,16 +36,19 @@ struct RunHistoryView: View {
                 }
             }
             .listStyle(.inset)
-            .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
             .overlay {
                 if model.runs.isEmpty {
                     ContentUnavailableView(
-                        "No runs yet",
+                        model.runFilters.isFiltering ? "No matching runs" : "No runs yet",
                         systemImage: "clock",
-                        description: Text("Run an automation and its results will appear here.")
+                        description: Text(model.runFilters.isFiltering
+                                          ? "Try clearing some filters."
+                                          : "Run an automation and its results will appear here.")
                     )
                 }
             }
+            }
+            .frame(minWidth: 280, idealWidth: 320, maxWidth: 400)
 
             Group {
                 if let run = selectedRun {
@@ -64,14 +72,45 @@ struct RunHistoryView: View {
 private struct RunDetail: View {
     @EnvironmentObject private var model: AppModel
     let run: WorkflowRun
+    @State private var showGraph = true
 
     var body: some View {
+        VStack(spacing: 0) {
+            if let core = model.core, showGraph, let graph = RunGraphView(run: run, core: core, onFix: { node in
+                model.openForFixing(workflowID: run.workflowID, nodeID: node)
+            }) {
+                header
+                Divider()
+                graph.id(run.id)
+            } else {
+                stepList
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(run.workflowName).font(.title3.weight(.semibold))
+            StateBadge(state: run.state)
+            Text("\(run.startedAt.formatted(date: .abbreviated, time: .standard)) · \(Formatting.trigger(run.trigger)) · \(Formatting.duration(run.duration))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Show Steps") { showGraph = false }
+        }
+        .padding(12)
+    }
+
+    private var stepList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(run.workflowName).font(.title2.weight(.semibold))
                     StateBadge(state: run.state)
                     Spacer()
+                    if model.core.flatMap({ try? $0.store.workflow(id: run.workflowID) }) != nil {
+                        Button("Show Graph") { showGraph = true }
+                    }
                     if let workflow = model.workflow(id: run.workflowID) {
                         Button("Open Automation") {
                             model.selectedWorkflowID = workflow.id
@@ -96,6 +135,13 @@ private struct RunDetail: View {
                     GridRow {
                         Text("Result").foregroundStyle(.secondary)
                         Text(run.summaryLine)
+                    }
+                    if !run.triggerPayload.isEmpty {
+                        GridRow {
+                            Text("Trigger reported").foregroundStyle(.secondary)
+                            Text(run.triggerPayload.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value.displayString)" }.joined(separator: " · "))
+                                .textSelection(.enabled)
+                        }
                     }
                 }
                 .font(.callout)

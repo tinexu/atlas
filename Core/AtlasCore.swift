@@ -13,6 +13,9 @@ public final class AtlasCore: @unchecked Sendable {
     public let engine: AutomationEngine
     /// Window layouts and session snapshots (Stage 03).
     public let windows: WindowService
+    /// Starts workflows when their triggers fire (Stage 04). Nil until
+    /// `startTriggers(environment:)` is called.
+    public private(set) var triggers: TriggerManager?
 
     public init(
         store: AtlasStore,
@@ -33,7 +36,8 @@ public final class AtlasCore: @unchecked Sendable {
             permissions: permissions,
             system: system,
             events: events,
-            store: store
+            store: store,
+            windows: windowAdapter
         )
         self.windows = WindowService(
             adapter: windowAdapter,
@@ -66,18 +70,46 @@ public final class AtlasCore: @unchecked Sendable {
         )
         try core.seedSampleWorkflowsIfNeeded()
         core.windows.startObservingDisplays()
+        core.startTriggers(environment: MacTriggerEnvironment())
         return core
     }
     #endif
 
     // MARK: - Workflow management
 
+    /// Starts listening for triggers. Runs keep working with every window
+    /// closed, as long as ATLAS (the menu bar app) is running.
+    public func startTriggers(environment: TriggerEnvironment) {
+        guard triggers == nil else { return }
+        let manager = TriggerManager(store: store, engine: engine, events: events, environment: environment,
+                                     system: system, registry: registry)
+        triggers = manager
+        manager.start()
+    }
+
+    /// Problems that would stop this workflow running correctly.
+    public func validate(_ workflow: Workflow) -> [ValidationIssue] {
+        WorkflowValidator.validate(workflow, registry: registry) { [store] id in
+            (try? store.workflow(id: id)) != nil
+        }
+    }
+
     /// Saves a workflow, stamping `updatedAt`, and announces the change.
+    ///
+    /// A workflow with triggers and validation errors is saved as a draft:
+    /// turned off, so it can't start on its own until it's fixed.
     @discardableResult
     public func save(_ workflow: Workflow) throws -> Workflow {
         var saved = workflow
         saved.updatedAt = Date()
         if saved.name.trimmingCharacters(in: .whitespaces).isEmpty { saved.name = "Untitled Automation" }
+        if saved.connections.isEmpty && saved.steps.count > 1 && saved.isLinear {
+            saved.connections = saved.effectiveConnections
+        }
+        NodePorts.refresh(&saved, registry: registry)
+        if saved.hasTriggers && saved.isEnabled && WorkflowValidator.hasErrors(validate(saved)) {
+            saved.isEnabled = false
+        }
         try store.saveWorkflow(saved)
         events.publish(AtlasEvent(AtlasEvent.Name.workflowSaved, payload: ["workflowId": .string(saved.id.uuidString)]))
         return saved

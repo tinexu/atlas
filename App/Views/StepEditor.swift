@@ -1,4 +1,6 @@
 import AtlasCore
+import AtlasFlow
+import AtlasSpaces
 import SwiftUI
 
 /// One step of a workflow. Its fields are generated from the action's
@@ -28,7 +30,7 @@ struct StepCard: View {
                                 Text(spec.label)
                                     .foregroundStyle(.secondary)
                                     .gridColumnAlignment(.trailing)
-                                ParameterField(spec: spec, value: binding(for: spec))
+                                ParameterField(spec: spec, value: binding(for: spec), parameters: step.parameters)
                             }
                         }
                     }
@@ -146,86 +148,18 @@ struct StepCard: View {
     }
 }
 
-/// An input control chosen by parameter kind.
+/// An input control chosen by parameter kind: the same field the graph
+/// editor uses, including menus of Spaces and profiles.
 struct ParameterField: View {
+    @EnvironmentObject private var model: AppModel
     let spec: ParameterSpec
     @Binding var value: ActionValue?
-
-    private var placeholder: String {
-        if let fallback = spec.defaultValue { return fallback.displayString }
-        return spec.help ?? (spec.isRequired ? "Required" : "Optional")
-    }
-
-    private var text: Binding<String> {
-        Binding(
-            get: { value?.stringValue ?? "" },
-            set: { value = $0.isEmpty ? nil : .string($0) }
-        )
-    }
+    /// The step's other values, for menus that depend on them (profiles of the chosen Space).
+    var parameters: ActionParameters = [:]
 
     var body: some View {
-        switch spec.kind {
-        case .boolean:
-            Toggle(spec.label, isOn: Binding(
-                get: { value?.boolValue ?? spec.defaultValue?.boolValue ?? false },
-                set: { value = .bool($0) }
-            ))
-            .labelsHidden()
-
-        case .number:
-            TextField(placeholder, value: Binding(
-                get: { value?.numberValue },
-                set: { value = $0.map(ActionValue.number) }
-            ), format: .number)
-            .frame(maxWidth: 120)
-
-        case .bundleIdentifier:
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    if let id = value?.stringValue, let icon = Pickers.applicationIcon(for: id) {
-                        Image(nsImage: icon).resizable().frame(width: 18, height: 18)
-                    }
-                    TextField(placeholder, text: text)
-                        .font(.body.monospaced())
-                    Button("Choose App…") {
-                        if let id = Pickers.chooseApplication() { value = .string(id) }
-                    }
-                }
-                appHint
-            }
-
-        case .filePath, .folderPath:
-            HStack {
-                TextField(placeholder, text: text)
-                Button("Choose…") {
-                    if let path = Pickers.choosePath(folders: spec.kind == .folderPath) { value = .string(path) }
-                }
-            }
-
-        case .url, .text:
-            if let options = spec.options {
-                Picker(spec.label, selection: Binding(
-                    get: { value?.stringValue ?? spec.defaultValue?.stringValue ?? options.first ?? "" },
-                    set: { value = .string($0) }
-                )) {
-                    ForEach(options, id: \.self) { option in
-                        Text(WindowPreset(rawValue: option)?.title ?? option).tag(option)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-            } else {
-                TextField(placeholder, text: text)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var appHint: some View {
-        if let id = value?.stringValue, !id.isEmpty, Pickers.applicationName(for: id) == nil {
-            Text("No installed app with this identifier")
-                .font(.caption2)
-                .foregroundStyle(.orange)
-        }
+        ParameterInput(spec: spec, value: $value, choices: model.core.flatMap {
+            SpaceParameterChoices.choices(for: spec, parameters: parameters, store: $0.store)
+        })
     }
 }

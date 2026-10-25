@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 @testable import AtlasCore
 
 /// Records every system call instead of touching the real Mac.
@@ -83,8 +84,50 @@ final class MockSystemAdapter: SystemAdapter, @unchecked Sendable {
     }
 
     func fileKind(atPath path: String) -> FileKind {
-        existingPaths[path] ?? .missing
+        lock.synchronized { existingPaths[path] ?? .missing }
     }
+
+    var fileSizes: [String: Int64] = [:]
+    var power: PowerStatus? = PowerStatus(batteryPercent: 80, isOnAdapter: true, isCharging: false)
+
+    func fileSize(atPath path: String) -> Int64? {
+        lock.synchronized { existingPaths[path] == nil ? nil : (fileSizes[path] ?? 1_000) }
+    }
+
+    func moveItem(atPath path: String, toPath destination: String) async throws {
+        record("move:\(path)->\(destination)")
+        try lock.synchronized {
+            guard let kind = existingPaths[path] else { throw SystemAdapterError.couldNotOpen(path) }
+            guard existingPaths[destination] == nil else { throw SystemAdapterError.couldNotOpen(destination) }
+            existingPaths[path] = nil
+            existingPaths[destination] = kind
+        }
+    }
+
+    func copyItem(atPath path: String, toPath destination: String) async throws {
+        record("copy:\(path)->\(destination)")
+        try lock.synchronized {
+            guard let kind = existingPaths[path] else { throw SystemAdapterError.couldNotOpen(path) }
+            guard existingPaths[destination] == nil else { throw SystemAdapterError.couldNotOpen(destination) }
+            existingPaths[destination] = kind
+        }
+    }
+
+    func createFolder(atPath path: String) async throws {
+        record("mkdir:\(path)")
+        lock.synchronized { existingPaths[path] = .directory }
+    }
+
+    func trashItem(atPath path: String) async throws -> String {
+        record("trash:\(path)")
+        return try lock.synchronized {
+            guard existingPaths[path] != nil else { throw SystemAdapterError.couldNotOpen(path) }
+            existingPaths[path] = nil
+            return "/Trash/" + (path as NSString).lastPathComponent
+        }
+    }
+
+    func powerStatus() -> PowerStatus? { lock.synchronized { power } }
 
     func applicationName(for bundleID: String) -> String? {
         installedApps[bundleID]
@@ -312,5 +355,114 @@ extension WorkflowStep {
 
     static func wait(_ seconds: Double, timeout: TimeInterval? = nil) -> WorkflowStep {
         WorkflowStep(actionID: DelayAction.id, parameters: ["seconds": .number(seconds)], timeout: timeout)
+    }
+}
+
+/// Trigger sources fired by hand.
+final class MockTriggerEnvironment: TriggerEnvironment, @unchecked Sendable {
+    private let lock = NSLock()
+    private var apps: [UUID: @Sendable (Bool, String, String) -> Void] = [:]
+    private var folders: [UUID: (path: String, handler: @Sendable ([FileChange]) -> Void)] = [:]
+    private var hotKeys: [UUID: (key: HotKey, handler: @Sendable () -> Void)] = [:]
+    private var powerHandlers: [UUID: @Sendable (PowerStatus) -> Void] = [:]
+    private var wakeHandlers: [UUID: @Sendable () -> Void] = [:]
+    private var schedules: [UUID: (date: Date, handler: @Sendable () -> Void)] = [:]
+    private var _now = Date(timeIntervalSince1970: 1_800_000_000)
+    /// Shortcuts "already taken by another app".
+    var takenShortcuts: Set<String> = []
+
+    var listenerCount: Int {
+        lock.synchronized { apps.count + folders.count + hotKeys.count + powerHandlers.count + wakeHandlers.count + schedules.count }
+    }
+    var scheduledDates: [Date] { lock.synchronized { schedules.values.map(\.date).sorted() } }
+
+    private func token<T>(_ path: ReferenceWritableKeyPath<MockTriggerEnvironment, [UUID: T]>, _ value: T) -> TriggerToken {
+        let id = UUID()
+        lock.synchronized { self[keyPath: path][id] = value }
+        return TriggerToken { [weak self] in
+            guard let self else { return }
+            self.lock.synchronized { _ = self[keyPath: path].removeValue(forKey: id) }
+        }
+    }
+
+    func observeApplications(_ handler: @escaping @Sendable (Bool, String, String) -> Void) -> TriggerToken {
+        token(\.apps, handler)
+    }
+
+    func watchFolder(_ path: String, _ handler: @escaping @Sendable ([FileChange]) -> Void) throws -> TriggerToken {
+        token(\.folders, (path, handler))
+    }
+
+    func registerHotKey(_ key: HotKey, _ handler: @escaping @Sendable () -> Void) throws -> TriggerToken {
+        if takenShortcuts.contains(key.display) { throw TriggerError("\(key.display) is already used by macOS or another app.") }
+        return token(\.hotKeys, (key, handler))
+    }
+
+    func observePower(_ handler: @escaping @Sendable (PowerStatus) -> Void) -> TriggerToken { token(\.powerHandlers, handler) }
+    func observeWake(_ handler: @escaping @Sendable () -> Void) -> TriggerToken { token(\.wakeHandlers, handler) }
+    func schedule(at date: Date, _ handler: @escaping @Sendable () -> Void) -> TriggerToken { token(\.schedules, (date, handler)) }
+    func now() -> Date { lock.synchronized { _now } }
+
+    func advance(by seconds: TimeInterval) { lock.synchronized { _now += seconds } }
+    func setNow(_ date: Date) { lock.synchronized { _now = date } }
+
+    func launch(_ bundleID: String, name: String) {
+        lock.synchronized { Array(apps.values) }.forEach { $0(true, bundleID, name) }
+    }
+
+    func quit(_ bundleID: String, name: String) {
+        lock.synchronized { Array(apps.values) }.forEach { $0(false, bundleID, name) }
+    }
+
+    func fileCreated(_ path: String) {
+        let parent = (path as NSString).deletingLastPathComponent
+        lock.synchronized { folders.values.filter { $0.path == parent } }.forEach { $0.handler([FileChange(path: path, kind: .created)]) }
+    }
+
+    func press(_ display: String) {
+        lock.synchronized { hotKeys.values.filter { $0.key.display == display } }.forEach { $0.handler() }
+    }
+
+    func power(_ status: PowerStatus) {
+        lock.synchronized { Array(powerHandlers.values) }.forEach { $0(status) }
+    }
+
+    func wake() { lock.synchronized { Array(wakeHandlers.values) }.forEach { $0() } }
+
+    /// Fires every schedule due by the current time.
+    func fireDueSchedules() {
+        let due = lock.synchronized { schedules.filter { $0.value.date <= _now } }
+        lock.synchronized { due.keys.forEach { schedules[$0] = nil } }
+        due.values.forEach { $0.handler() }
+    }
+}
+
+extension TestHarness {
+    /// Starts triggers with a mock environment and fast timings.
+    @discardableResult
+    func startTriggers() -> MockTriggerEnvironment {
+        let environment = MockTriggerEnvironment()
+        core.startTriggers(environment: environment)
+        core.triggers?.fileSettleInterval = 0.01
+        return environment
+    }
+
+    /// Waits until `condition` holds or `timeout` passes.
+    func waitUntil(timeout: TimeInterval = 3, _ condition: () async throws -> Bool) async rethrows -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if try await condition() { return true }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return try await condition()
+    }
+
+    /// XCTAssertTrue without an autoclosure, so the value can come from `await`.
+    func expect(_ ok: Bool, _ message: @autoclosure () throws -> String = "", file: StaticString = #filePath, line: UInt = #line) rethrows {
+        if !ok { XCTFail(try message(), file: file, line: line) }
+    }
+
+    func runs(of workflow: Workflow) throws -> [WorkflowRun] {
+        try store.runs(workflowID: workflow.id, limit: 100).sorted { $0.startedAt < $1.startedAt }
     }
 }

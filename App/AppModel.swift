@@ -1,7 +1,10 @@
 import AppKit
 import AtlasCore
+import AtlasFlow
 import AtlasSpacesUI
+import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 /// UI-facing state. Owns no logic of its own: everything real happens in
 /// `AtlasCore`, and this object mirrors it for SwiftUI.
@@ -56,6 +59,15 @@ final class AppModel: ObservableObject {
     let core: AtlasCore?
     let spaces: SpacesModel
     let windowManager: WindowManagerModel
+    /// One editor per open automation, so drafts and undo survive switching.
+    private var editors: [UUID: FlowEditorModel] = [:]
+    /// Run History filters.
+    @Published var runFilters = RunFilters() {
+        didSet { reloadRuns() }
+    }
+    /// A node to centre when an automation's editor opens ("Fix" in Run History).
+    @Published var pendingFocus: (workflowID: UUID, nodeID: UUID)?
+    @Published private(set) var launchesAtLogin = false
     private var eventTask: Task<Void, Never>?
     private var accessibilityMonitor: Timer?
     private var hadAccessibility = false
@@ -81,6 +93,47 @@ final class AppModel: ObservableObject {
         installConfirmationHandler()
         Task { await refreshPermissions() }
         monitorAccessibility()
+        launchesAtLogin = SMAppService.mainApp.status == .enabled
+    }
+
+    // MARK: - Flow editor
+
+    func editor(for workflow: Workflow) -> FlowEditorModel? {
+        guard let core else { return nil }
+        if let existing = editors[workflow.id] { return existing }
+        let editor = FlowEditorModel(workflow: workflow, core: core) { [weak self] _ in self?.reloadWorkflows() }
+        editors[workflow.id] = editor
+        return editor
+    }
+
+    /// Opens an automation with one of its steps centred and selected.
+    func openForFixing(workflowID: UUID, nodeID: UUID) {
+        pendingFocus = (workflowID, nodeID)
+        selectedWorkflowID = workflowID
+        section = .automations
+        if let workflow = workflow(id: workflowID), let editor = editor(for: workflow) {
+            editor.viewMode = .canvas
+            Task { @MainActor in
+                // Let the editor lay out first.
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                editor.focus(on: nodeID)
+            }
+        }
+    }
+
+    // MARK: - Background
+
+    /// Registers ATLAS as a login item so triggers keep working after a
+    /// restart. Needs the app bundle (scripts/build-app.sh).
+    func setLaunchesAtLogin(_ enabled: Bool) {
+        do {
+            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+        } catch {
+            errorMessage = Bundle.main.bundleIdentifier == nil
+                ? "Starting at login needs ATLAS to run as an app bundle. Build it with scripts/build-app.sh."
+                : "Couldn't change the login item: \(error.localizedDescription)"
+        }
+        launchesAtLogin = SMAppService.mainApp.status == .enabled
     }
 
     var registry: ActionRegistry? { core?.registry }
@@ -96,6 +149,7 @@ final class AppModel: ObservableObject {
         guard let core else { return }
         do {
             workflows = try core.store.workflows()
+            for workflow in workflows { editors[workflow.id]?.reload(from: workflow) }
         } catch {
             report(error)
         }
@@ -125,22 +179,14 @@ final class AppModel: ObservableObject {
     }
 
     func duplicate(_ workflow: Workflow) {
-        var copy = workflow
-        copy.id = UUID()
-        copy.name = workflow.name + " Copy"
-        copy.createdAt = Date()
-        copy.steps = workflow.steps.map { step in
-            var step = step
-            step.id = UUID()
-            return step
-        }
-        if let saved = save(copy) { selectedWorkflowID = saved.id }
+        if let saved = save(workflow.duplicate(named: workflow.name + " Copy")) { selectedWorkflowID = saved.id }
     }
 
     func delete(_ workflow: Workflow) {
         guard let core else { return }
         do {
             try core.delete(workflowID: workflow.id)
+            editors[workflow.id] = nil
             reloadWorkflows()
             if selectedWorkflowID == workflow.id { selectedWorkflowID = workflows.first?.id }
         } catch {
@@ -169,7 +215,7 @@ final class AppModel: ObservableObject {
     func reloadRuns() {
         guard let core else { return }
         do {
-            runs = try core.store.runs(limit: 200)
+            runs = try core.store.runs(matching: runFilters.query, limit: 300)
         } catch {
             report(error)
         }
@@ -256,6 +302,11 @@ final class AppModel: ObservableObject {
     }
 
     private func askForConfirmation(_ request: ConfirmationRequest) async -> Bool {
+        // Automatic runs may happen with no window open: ask with a
+        // notification. The engine stops waiting after its timeout.
+        if request.isAutomatic, Bundle.main.bundleIdentifier != nil {
+            return await ConfirmationNotifications.shared.ask(request)
+        }
         // Only one prompt at a time; a second concurrent request is declined
         // rather than silently replacing the first.
         guard pendingConfirmation == nil else { return false }
@@ -302,5 +353,64 @@ final class AppModel: ObservableObject {
 
     private func report(_ error: Error) {
         errorMessage = error.localizedDescription
+    }
+}
+
+/// Asks to approve a step of an automatic run with an actionable
+/// notification, so it works with every window closed.
+final class ConfirmationNotifications: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    static let shared = ConfirmationNotifications()
+    private static let category = "atlas.confirm"
+    private let lock = NSLock()
+    private var waiting: [String: CheckedContinuation<Bool, Never>] = [:]
+
+    func install() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.setNotificationCategories([UNNotificationCategory(
+            identifier: Self.category,
+            actions: [
+                UNNotificationAction(identifier: "allow", title: "Allow", options: []),
+                UNNotificationAction(identifier: "deny", title: "Don't Allow", options: [.destructive]),
+            ],
+            intentIdentifiers: []
+        )])
+    }
+
+    func ask(_ request: ConfirmationRequest) async -> Bool {
+        let id = request.id.uuidString
+        let content = UNMutableNotificationContent()
+        content.title = "“\(request.workflowName)” wants to \(request.stepLabel)"
+        content.body = "\(request.descriptor.summary) It won't run unless you allow it."
+        content.categoryIdentifier = Self.category
+        content.sound = .default
+        do {
+            try await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        } catch {
+            return false
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.withLock { waiting[id] = continuation }
+            }
+        } onCancel: {
+            // The engine gave up waiting: decline and tidy the notification away.
+            self.resolve(id, false)
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
+        }
+    }
+
+    private func resolve(_ id: String, _ approved: Bool) {
+        let continuation = lock.withLock { waiting.removeValue(forKey: id) }
+        continuation?.resume(returning: approved)
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        resolve(response.notification.request.identifier, response.actionIdentifier == "allow")
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
     }
 }

@@ -109,9 +109,10 @@ final class AutomationEngineTests: XCTestCase {
     func testUndeterminedPermissionIsRequestedOnce() async throws {
         let provider = MockPermissionProvider(statuses: [.notifications: .notDetermined])
         let h = try TestHarness(permissions: provider)
-        let step = WorkflowStep(actionID: ShowNotificationAction.id, parameters: ["title": "Hi"])
+        let first = WorkflowStep(actionID: ShowNotificationAction.id, parameters: ["title": "Hi"])
+        let second = WorkflowStep(actionID: ShowNotificationAction.id, parameters: ["title": "Again"])
 
-        let run = await h.engine.run(Workflow(name: "W", steps: [step, step]))
+        let run = await h.engine.run(Workflow(name: "W", steps: [first, second]))
 
         XCTAssertEqual(run.state, .succeeded)
         XCTAssertEqual(provider.requestCount, 1)
@@ -237,7 +238,10 @@ final class AutomationEngineTests: XCTestCase {
     func testEventsArePublishedInOrder() async throws {
         let h = try TestHarness()
         let collected = EventCollector()
-        h.core.events.subscribe("*") { collected.append($0.name) }
+        // Stage 04 adds node.* events alongside these; the Stage 01 families are unchanged.
+        h.core.events.subscribe("*") { event in
+            if event.name.hasPrefix("workflow.") || event.name.hasPrefix("step.") { collected.append(event.name) }
+        }
 
         _ = await h.engine.run(Workflow(name: "W", steps: [.launch("com.apple.Terminal")]))
 

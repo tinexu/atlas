@@ -15,6 +15,12 @@ public enum BuiltInActions {
             ShowNotificationAction(),
             DelayAction(),
             LogMessageAction(),
+            MoveFileAction(),
+            CopyFileAction(),
+            RenameFileAction(),
+            CreateFolderAction(),
+            TrashFileAction(),
+            StartTimerAction(),
         ]
     }
 }
@@ -38,7 +44,8 @@ public struct LaunchApplicationAction: AtlasAction {
         ],
         sideEffects: [.launchesApplication],
         isIdempotent: true,
-        defaultTimeout: 30
+        defaultTimeout: 30,
+        outputs: [OutputSpec(key: "appName", label: "App name", type: .string)]
     )
 
     public init() {}
@@ -47,6 +54,9 @@ public struct LaunchApplicationAction: AtlasAction {
         let bundleID = try parameters.requiredString("bundleId")
         let activate = parameters["activate"]?.boolValue ?? true
         let outcome = try await context.system.launchApplication(bundleID: bundleID, activate: activate)
+        if !outcome.wasAlreadyRunning {
+            context.reportEffect(.app, bundleID)
+        }
         let message = outcome.wasAlreadyRunning
             ? "\(outcome.displayName) was already running"
             : "Launched \(outcome.displayName)"
@@ -172,7 +182,9 @@ public struct OpenURLAction: AtlasAction {
         sideEffects: [.opensURL],
         // Retrying could open duplicate tabs.
         isIdempotent: false,
-        defaultTimeout: 20
+        defaultTimeout: 20,
+        outputs: [OutputSpec(key: "url", label: "Link", type: .url)],
+        isConcurrencySafe: true
     )
 
     public init() {}
@@ -266,7 +278,8 @@ public struct ShowNotificationAction: AtlasAction {
         sideEffects: [.showsNotification],
         // A retry could post the same notification twice.
         isIdempotent: false,
-        defaultTimeout: 10
+        defaultTimeout: 10,
+        isConcurrencySafe: true
     )
 
     public init() {}
@@ -294,7 +307,8 @@ public struct DelayAction: AtlasAction {
         ],
         isIdempotent: true,
         // Longer than the maximum wait so the timeout never cuts it short.
-        defaultTimeout: 3_660
+        defaultTimeout: 3_660,
+        isConcurrencySafe: true
     )
 
     public init() {}
@@ -320,7 +334,8 @@ public struct LogMessageAction: AtlasAction {
             ParameterSpec(key: "message", label: "Message", kind: .text),
         ],
         isIdempotent: true,
-        defaultTimeout: 5
+        defaultTimeout: 5,
+        isConcurrencySafe: true
     )
 
     public init() {}

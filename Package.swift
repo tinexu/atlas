@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "ATLAS", targets: ["ATLAS"]),
         .library(name: "AtlasCore", targets: ["AtlasCore"]),
         .library(name: "AtlasSpaces", targets: ["AtlasSpaces"]),
+        .library(name: "AtlasFlow", targets: ["AtlasFlow"]),
     ],
     targets: [
         // Headless foundation: event bus, action registry, permissions,
@@ -37,10 +38,18 @@ let package = Package(
             exclude: ["SpaceModels", "WorkspaceActivation", "WorldEditor/Model", "WindowManager/Model"],
             sources: ["MissionControl", "WorldEditor/Rendering", "WindowManager/Views", "SessionSnapshots"]
         ),
+        // Stage 04 Flow: the Automation Galaxy editor (2D and 3D), node
+        // inspectors, live run view and history graph. The graph model,
+        // runner and triggers live in Core.
+        .target(
+            name: "AtlasFlow",
+            dependencies: ["AtlasCore", "AtlasSpaces"],
+            path: "Modules/Flow"
+        ),
         // Native SwiftUI shell.
         .executableTarget(
             name: "ATLAS",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow"],
             path: "App"
         ),
         .testTarget(

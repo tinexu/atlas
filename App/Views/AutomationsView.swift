@@ -1,4 +1,5 @@
 import AtlasCore
+import AtlasFlow
 import SwiftUI
 
 struct AutomationsView: View {
@@ -10,13 +11,13 @@ struct AutomationsView: View {
                 .frame(minWidth: 230, idealWidth: 260, maxWidth: 340)
             Group {
                 if let workflow = model.workflow(id: model.selectedWorkflowID) {
-                    WorkflowEditor(original: workflow)
+                    AutomationDetail(workflow: workflow)
                         .id(workflow.id)
                 } else {
                     ContentUnavailableView {
                         Label("No automation selected", systemImage: "bolt.horizontal.circle")
                     } description: {
-                        Text("An automation is a list of steps ATLAS runs for you, like opening the apps and pages you always start with.")
+                        Text("An automation is a set of steps ATLAS runs for you, by hand or when something happens on your Mac, like a file arriving in Downloads.")
                     } actions: {
                         Button("New Automation") { model.createWorkflow() }
                     }
@@ -25,6 +26,47 @@ struct AutomationsView: View {
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("Automations")
+    }
+}
+
+/// An automation as a graph (the full editor), or as the Stage 01 step
+/// list when it's a plain sequence of actions.
+private struct AutomationDetail: View {
+    @EnvironmentObject private var model: AppModel
+    let workflow: Workflow
+    @State private var showSteps = false
+
+    var body: some View {
+        let editor = model.editor(for: workflow)
+        VStack(spacing: 0) {
+            if workflow.isLinear {
+                HStack {
+                    Picker("Edit as", selection: $showSteps) {
+                        Text("Graph").tag(false)
+                        Text("Step List").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .disabled(editor?.isDirty ?? false)
+                    .help(editor?.isDirty ?? false ? "Save or revert the graph first" : "A plain list of steps can also be edited as a list")
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                Divider()
+            }
+            if showSteps && workflow.isLinear {
+                WorkflowEditor(original: workflow)
+            } else if let editor {
+                FlowEditorView(model: editor)
+            }
+        }
+        .onAppear {
+            if let focus = model.pendingFocus, focus.workflowID == workflow.id {
+                showSteps = false
+                model.pendingFocus = nil
+            }
+        }
     }
 }
 
@@ -214,7 +256,10 @@ struct WorkflowEditor: View {
     @discardableResult
     private func save() -> Workflow? {
         guard isDirty else { return original }
-        guard let saved = model.save(draft) else { return nil }
+        // The list's order is the run order.
+        var list = draft
+        list.rechainLinearSteps()
+        guard let saved = model.save(list) else { return nil }
         draft = saved
         return saved
     }

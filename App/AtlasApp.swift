@@ -75,5 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // background process with no Dock icon or focus.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        ConfirmationNotifications.shared.install()
+    }
+
+    /// Closing the window leaves ATLAS running in the menu bar, so
+    /// triggers and runs keep working.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 }

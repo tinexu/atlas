@@ -714,3 +714,51 @@ final class SpaceWindowTests: XCTestCase {
         XCTAssertFalse(h.system.calls.contains { $0.hasPrefix("quit:") })
     }
 }
+
+// MARK: - Flow (Stage 04)
+
+final class SpaceFlowTests: XCTestCase {
+    func testAppLaunchTriggerActivatesASpace() async throws {
+        let h = try SpacesHarness()
+        let env = h.base.startTriggers()
+        let (studio, _, _) = try h.makeSpace("Creative Studio", steps: [.launch("com.apple.Music")])
+        var g = GraphBuilder()
+        let trigger = g.add(.trigger(TriggerCatalog.appLaunched, parameters: ["app": "org.blenderfoundation.blender"]))
+        let activate = g.add(WorkflowStep(actionID: SpaceActivateAction.id, parameters: ["space": "Creative Studio"]))
+        g.flow(trigger, to: activate)
+        let workflow = try h.core.save(g.workflow("When Blender launches, activate Creative Studio"))
+        _ = await h.base.waitUntil { env.listenerCount == 1 }
+
+        env.launch("org.blenderfoundation.blender", name: "Blender")
+
+        try await h.base.expect(h.base.waitUntil { try h.store.activeSpaceID() == studio.id }, "Creative Studio became active")
+        try await h.base.expect(h.base.waitUntil { try h.base.runs(of: workflow).first?.state == .succeeded })
+        XCTAssertTrue(h.system.calls.contains("launch:com.apple.Music"))
+        // The Space's own activation is a separate run with its usual trigger.
+        let spaceRuns = try h.store.runs(matching: RunQuery(trigger: "space.activated"))
+        XCTAssertEqual(spaceRuns.count, 1)
+    }
+}
+
+final class SpaceParameterChoicesTests: XCTestCase {
+    func testActivateSpaceOffersSpacesAndTheChosenSpacesProfiles() throws {
+        let h = try SpacesHarness()
+        let (studio, _, _) = try h.makeSpace("Creative Studio", steps: [.launch("com.apple.Music")])
+        try h.makeSpace("Coding Lab", steps: [.launch("com.apple.Terminal")])
+        let review = try h.core.save(Workflow(name: "Review", steps: [.log("r")]))
+        _ = try h.library.addProfile(to: studio.id, name: "Sketching", workflowID: review.id)
+        let descriptor = try XCTUnwrap(h.core.registry.descriptor(for: SpaceActivateAction.id))
+        let spaceSpec = try XCTUnwrap(descriptor.parameters.first { $0.key == "space" })
+        let profileSpec = try XCTUnwrap(descriptor.parameters.first { $0.key == "profile" })
+
+        XCTAssertEqual(Set(SpaceParameterChoices.choices(for: spaceSpec, parameters: [:], store: h.store) ?? []),
+                       ["Creative Studio", "Coding Lab"])
+        XCTAssertEqual(SpaceParameterChoices.choices(for: profileSpec, parameters: ["space": "creative studio"], store: h.store),
+                       ["Default", "Sketching"])
+        XCTAssertNil(SpaceParameterChoices.choices(for: profileSpec, parameters: ["space": "{{var.space}}"], store: h.store),
+                     "Unknown until the run")
+
+        // Still free text: a placeholder or a name typed by hand passes validation.
+        XCTAssertNoThrow(try h.core.registry.validate(["space": "{{var.space}}"], for: descriptor))
+    }
+}

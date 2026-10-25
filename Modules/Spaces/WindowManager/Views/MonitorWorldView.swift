@@ -60,6 +60,8 @@ public struct MonitorWorldView: View {
     private func world(size: CGSize) -> some View {
         RealityView { content in
             content.camera = .virtual
+            // After a pause the old view may still hold the scene; take it back first.
+            scene.root.removeFromParent()
             content.add(scene.root)
         } update: { _ in
             scene.sync(

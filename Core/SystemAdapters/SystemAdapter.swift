@@ -29,6 +29,20 @@ public struct RunningApplication: Sendable, Hashable, Identifiable {
     }
 }
 
+/// Battery and power adapter state. Nil from `powerStatus()` on Macs
+/// without a battery.
+public struct PowerStatus: Sendable, Equatable {
+    public let batteryPercent: Int
+    public let isOnAdapter: Bool
+    public let isCharging: Bool
+
+    public init(batteryPercent: Int, isOnAdapter: Bool, isCharging: Bool) {
+        self.batteryPercent = batteryPercent
+        self.isOnAdapter = isOnAdapter
+        self.isCharging = isCharging
+    }
+}
+
 public enum FileKind: Sendable, Equatable {
     case missing
     case file
@@ -77,6 +91,15 @@ public protocol SystemAdapter: Sendable {
     func reveal(path: String) async throws
     func postNotification(title: String, body: String) async throws
     func fileKind(atPath path: String) -> FileKind
+    /// Bytes, or nil if nothing is there.
+    func fileSize(atPath path: String) -> Int64?
+    /// Moves or renames an item. Fails if something is already at `destination`.
+    func moveItem(atPath path: String, toPath destination: String) async throws
+    func copyItem(atPath path: String, toPath destination: String) async throws
+    func createFolder(atPath path: String) async throws
+    /// Moves an item to the Trash (never deletes outright). Returns where it went.
+    func trashItem(atPath path: String) async throws -> String
+    func powerStatus() -> PowerStatus?
     func applicationName(for bundleID: String) -> String?
     func runningApplications() -> [RunningApplication]
 }
