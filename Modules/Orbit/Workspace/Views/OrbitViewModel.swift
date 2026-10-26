@@ -268,6 +268,20 @@ public final class OrbitViewModel: ObservableObject {
         enter(folder == location.path ? nil : (folder as NSString).deletingLastPathComponent)
     }
 
+    /// The biggest files across every Orbit folder.
+    public func largestFiles(limit: Int = 25) -> [FileEntry] {
+        _ = revision
+        let roots = locations.map(\.path)
+        guard !roots.isEmpty else { return [] }
+        return (try? module.core.store.entries(matching: FileQuery(roots: roots, kind: .filesOnly, sort: .sizeDescending, limit: limit))) ?? []
+    }
+
+    /// The Browser's overview, which lists the largest files first.
+    public func showLargestFiles() {
+        tab = .browser
+        enter(nil)
+    }
+
     /// Shows a file in the Universe: enters its folder and selects it.
     public func reveal(inUniverse path: String) {
         currentFolder = (path as NSString).deletingLastPathComponent

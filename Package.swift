@@ -12,6 +12,8 @@ let package = Package(
         .library(name: "AtlasFlow", targets: ["AtlasFlow"]),
         .library(name: "AtlasOrbit", targets: ["AtlasOrbit"]),
         .library(name: "AtlasOrbitUI", targets: ["AtlasOrbitUI"]),
+        .library(name: "AtlasCompanion", targets: ["AtlasCompanion"]),
+        .library(name: "AtlasCompanionUI", targets: ["AtlasCompanionUI"]),
     ],
     targets: [
         // Headless foundation: event bus, action registry, permissions,
@@ -73,15 +75,39 @@ let package = Package(
             sources: ["FileUniverse", "Browser", "FileOrganizer/Views", "Search/Views", "DuplicateDetection/Views",
                       "SystemHealth/Views", "Workspace/Views"]
         ),
+        // Stage 06 Companion, headless half: the animation state machine, the
+        // command parser and optional AI layer, plan validation, suggestions
+        // and overlay geometry. A control surface only: every command ends as
+        // a registered action or workflow run through the engine.
+        .target(
+            name: "AtlasCompanion",
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit"],
+            path: "Modules/Companion",
+            exclude: ["CharacterRenderer/Views", "DesktopOverlay/Views", "CommandInterface/Views", "Settings"],
+            sources: ["AnimationStates", "IntentParser", "ContextualSuggestions", "CommandInterface/Model", "DesktopOverlay/Model",
+                      "CharacterRenderer/Model"]
+        ),
+        // Stage 06 Companion, presentation half: the RealityKit character, the
+        // desktop overlay panel, quick controls, the command palette and the
+        // Companion settings screen.
+        .target(
+            name: "AtlasCompanionUI",
+            dependencies: ["AtlasCompanion"],
+            path: "Modules/Companion",
+            exclude: ["AnimationStates", "IntentParser", "ContextualSuggestions", "CommandInterface/Model", "DesktopOverlay/Model",
+                      "CharacterRenderer/Model"],
+            sources: ["CharacterRenderer/Views", "DesktopOverlay/Views", "CommandInterface/Views", "Settings"]
+        ),
         // Native SwiftUI shell.
         .executableTarget(
             name: "ATLAS",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow", "AtlasOrbit", "AtlasOrbitUI"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow", "AtlasOrbit", "AtlasOrbitUI",
+                           "AtlasCompanion", "AtlasCompanionUI"],
             path: "App"
         ),
         .testTarget(
             name: "AtlasCoreTests",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit", "AtlasCompanion"],
             path: "Tests/Unit"
         ),
     ]

@@ -68,6 +68,7 @@ final class EventRecorder: @unchecked Sendable {
     }
 
     func named(_ name: String) -> [AtlasEvent] { lock.withLock { events.filter { $0.name == name } } }
+    var all: [AtlasEvent] { lock.withLock { events } }
 }
 
 extension TestHarness {
@@ -776,7 +777,7 @@ final class OrbitMigrationTests: XCTestCase {
         }
 
         let store = try AtlasStore(database: SQLiteDatabase(path: url.path))
-        XCTAssertEqual(store.database.userVersion, 5)
+        XCTAssertEqual(store.database.userVersion, Schema.currentVersion)
         XCTAssertEqual(try store.workflow(id: workflowID)?.name, "Old", "Existing data survives")
         let location = FileLocation(path: "/tmp/x")
         try store.saveLocation(location)

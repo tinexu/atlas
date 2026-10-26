@@ -331,6 +331,53 @@ enum Schema {
         );
         CREATE INDEX idx_health_sample_time ON health_sample(taken_at);
         """,
+        // v6 — Stage 06: Companion. One settings row; command history (last
+        // 50, local only); a log of every suggestion shown and why; and app
+        // launches for repetition detection (bundle IDs and times only, 14 days).
+        """
+        CREATE TABLE companion_settings (
+            id                INTEGER PRIMARY KEY CHECK (id = 1),
+            character         TEXT NOT NULL DEFAULT 'robot',
+            primary_color     TEXT NOT NULL DEFAULT '#5B8DEF',
+            secondary_color   TEXT NOT NULL DEFAULT '#F5F7FA',
+            accessory         TEXT NOT NULL DEFAULT 'none',
+            size              TEXT NOT NULL DEFAULT 'medium',
+            intensity         TEXT NOT NULL DEFAULT 'full',
+            overlay_mode      TEXT NOT NULL DEFAULT 'onTop',
+            click_through     INTEGER NOT NULL DEFAULT 1,
+            positions_json    TEXT NOT NULL DEFAULT '{}',
+            ai_provider       TEXT NOT NULL DEFAULT 'off',
+            context_json      TEXT NOT NULL DEFAULT '{}',
+            extra_json        TEXT NOT NULL DEFAULT '{}',
+            updated_at        REAL NOT NULL
+        );
+
+        CREATE TABLE companion_command (
+            id          TEXT PRIMARY KEY,
+            text        TEXT NOT NULL,
+            summary     TEXT NOT NULL DEFAULT '',
+            source      TEXT NOT NULL,
+            created_at  REAL NOT NULL
+        );
+        CREATE INDEX idx_companion_command_time ON companion_command(created_at DESC);
+
+        CREATE TABLE companion_suggestion (
+            id          TEXT PRIMARY KEY,
+            kind        TEXT NOT NULL,
+            title       TEXT NOT NULL,
+            reason      TEXT NOT NULL,
+            state       TEXT NOT NULL DEFAULT 'shown',
+            created_at  REAL NOT NULL,
+            resolved_at REAL
+        );
+        CREATE INDEX idx_companion_suggestion_time ON companion_suggestion(created_at DESC);
+
+        CREATE TABLE app_launch (
+            bundle_id    TEXT NOT NULL,
+            launched_at  REAL NOT NULL
+        );
+        CREATE INDEX idx_app_launch_time ON app_launch(launched_at);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

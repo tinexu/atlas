@@ -23,6 +23,7 @@ public enum BuiltInActions {
             TagFileAction(),
             UndoFileOperationAction(),
             StartTimerAction(),
+            StopTimerAction(),
         ]
     }
 }

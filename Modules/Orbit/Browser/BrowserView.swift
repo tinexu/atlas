@@ -280,7 +280,28 @@ struct OverviewList: View {
     @ObservedObject var model: OrbitViewModel
 
     var body: some View {
-        List {
+        List(selection: Binding(get: { model.selection }, set: { model.selection = $0 })) {
+            let largest = model.largestFiles()
+            if !largest.isEmpty {
+                Section("Largest Files") {
+                    ForEach(largest) { entry in
+                        HStack {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: entry.path)).resizable().frame(width: 16, height: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(entry.name).lineLimit(1)
+                                Text(entry.parent.abbreviatedPath).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            }
+                            Spacer()
+                            Text(OrbitFormat.bytes(entry.size)).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .tag(entry.path)
+                        .contextMenu {
+                            Button("Show in Finder") { model.showInFinder(entry.path) }
+                            Button("Move to Trash…", role: .destructive) { model.requestTrash([entry.path]) }
+                        }
+                    }
+                }
+            }
             Section("Folders") {
                 ForEach(model.locations) { location in
                     Button { model.enter(location.path) } label: {

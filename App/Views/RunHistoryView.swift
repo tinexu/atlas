@@ -64,7 +64,16 @@ struct RunHistoryView: View {
             Button { model.reloadRuns() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
         }
         .onAppear {
+            if let focused = model.focusedRunID {
+                selectedRunID = focused
+                model.focusedRunID = nil
+            }
             if selectedRunID == nil { selectedRunID = model.runs.first?.id }
+        }
+        .onChange(of: model.focusedRunID) { _, focused in
+            guard let focused else { return }
+            selectedRunID = focused
+            model.focusedRunID = nil
         }
     }
 }

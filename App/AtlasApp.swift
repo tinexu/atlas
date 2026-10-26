@@ -27,6 +27,12 @@ struct AtlasApp: App {
                 .keyboardShortcut("p", modifiers: [.command, .shift])
             }
             SpacesCommands(spaces: model.spaces)
+            CommandGroup(after: .toolbar) {
+                if let companion = model.companion {
+                    CompanionMenuItems(companion: companion)
+                    Divider()
+                }
+            }
         }
 
         // Low-resource control surface (spec 9.4): run automations and pause

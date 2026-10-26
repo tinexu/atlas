@@ -1,3 +1,4 @@
+import AtlasCompanionUI
 import AtlasCore
 import AtlasOrbitUI
 import AtlasSpacesUI
@@ -5,6 +6,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if let error = model.startupError {
@@ -36,6 +38,8 @@ struct RootView: View {
                 case .automations: AutomationsView()
                 case .history: RunHistoryView()
                 case .actions: ActionLibraryView()
+                case .companion:
+                    if let companion = model.companion { CompanionSettingsView(controller: companion) } else { unavailable("The Companion") }
                 case .permissions: PermissionsView()
                 }
             }
@@ -64,6 +68,7 @@ struct RootView: View {
                 Text(model.errorMessage ?? "")
             }
             .onReceive(NotificationCenter.default.publisher(for: .orbitOpenHealth)) { _ in model.section = .health }
+            .onAppear { model.openMainWindow = { openWindow(id: "main") } }
         }
     }
 

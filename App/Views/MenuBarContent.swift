@@ -1,4 +1,5 @@
 import AppKit
+import AtlasCompanionUI
 import AtlasCore
 import SwiftUI
 
@@ -48,6 +49,9 @@ struct MenuBarContent: View {
         if let triggers = model.core?.triggers, !model.isPaused {
             Text(triggers.activeTriggerCount == 1 ? "1 trigger listening" : "\(triggers.activeTriggerCount) triggers listening")
         }
+        if let companion = model.companion {
+            CompanionMenuItems(companion: companion)
+        }
         Toggle("Start ATLAS at Login", isOn: Binding(
             get: { model.launchesAtLogin },
             set: { model.setLaunchesAtLogin($0) }
@@ -56,6 +60,7 @@ struct MenuBarContent: View {
         Divider()
 
         Button("Open ATLAS") {
+            model.openMainWindow = { openWindow(id: "main") }
             openWindow(id: "main")
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -63,5 +68,16 @@ struct MenuBarContent: View {
 
         Button("Quit ATLAS") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
+    }
+}
+
+/// "Show/Hide Companion" and the command palette, for the menu bar and the
+/// app's View menu.
+struct CompanionMenuItems: View {
+    @ObservedObject var companion: CompanionController
+
+    var body: some View {
+        Button(companion.isVisible ? "Hide Companion" : "Show Companion") { companion.setVisible(!companion.isVisible) }
+        Button("Command Palette…") { companion.showPalette() }
     }
 }

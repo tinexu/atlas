@@ -1,4 +1,6 @@
 import AppKit
+import AtlasCompanion
+import AtlasCompanionUI
 import AtlasCore
 import AtlasFlow
 import AtlasOrbit
@@ -13,7 +15,7 @@ import UserNotifications
 @MainActor
 final class AppModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case spaces, windows, orbit, health, automations, history, actions, permissions
+        case spaces, windows, orbit, health, automations, history, actions, companion, permissions
         var id: Self { self }
 
         var title: String {
@@ -25,6 +27,7 @@ final class AppModel: ObservableObject {
             case .automations: return "Automations"
             case .history: return "Run History"
             case .actions: return "Action Library"
+            case .companion: return "Companion"
             case .permissions: return "Permissions"
             }
         }
@@ -38,6 +41,7 @@ final class AppModel: ObservableObject {
             case .automations: return "bolt.horizontal.circle"
             case .history: return "clock.arrow.circlepath"
             case .actions: return "square.grid.2x2"
+            case .companion: return "face.smiling"
             case .permissions: return "lock.shield"
             }
         }
@@ -67,6 +71,12 @@ final class AppModel: ObservableObject {
     let windowManager: WindowManagerModel
     /// Stage 05 Orbit: files and Mac Health. Nil if it couldn't start.
     let orbit: OrbitViewModel?
+    /// Stage 06 Companion: the desktop assistant. Nil if ATLAS couldn't start.
+    let companion: CompanionController?
+    /// A run to select when Run History appears (the Companion's "Details").
+    @Published var focusedRunID: UUID?
+    /// Opens the main window; set by the first view that has `openWindow`.
+    var openMainWindow: (() -> Void)?
     /// One editor per open automation, so drafts and undo survive switching.
     private var editors: [UUID: FlowEditorModel] = [:]
     /// Run History filters.
@@ -88,6 +98,7 @@ final class AppModel: ObservableObject {
             spaces = SpacesModel(core: nil)
             windowManager = WindowManagerModel(core: nil)
             orbit = nil
+            companion = nil
             startupError = error.localizedDescription
             return
         }
@@ -101,6 +112,7 @@ final class AppModel: ObservableObject {
             orbit = nil
             orbitError = ActionError.failed("Orbit couldn't start, so file features are unavailable.")
         }
+        companion = core.map(CompanionController.init)
         spaces.onError = { [weak self] message in self?.errorMessage = message }
         reloadWorkflows()
         reloadRuns()
@@ -112,6 +124,7 @@ final class AppModel: ObservableObject {
         monitorAccessibility()
         launchesAtLogin = SMAppService.mainApp.status == .enabled
         connectOrbit()
+        connectCompanion()
         if let orbitError { errorMessage = orbitError.localizedDescription }
     }
 
@@ -124,6 +137,90 @@ final class AppModel: ObservableObject {
             self.reloadWorkflows()
             self.selectedWorkflowID = id
             self.section = .automations
+        }
+    }
+
+    // MARK: - Companion
+
+    private func connectCompanion() {
+        guard let companion else { return }
+        var host = CompanionHost()
+        host.openSection = { [weak self] name in
+            guard let self else { return }
+            if let section = Section(rawValue: name) { self.section = section }
+            self.bringForward()
+        }
+        host.openRunHistory = { [weak self] runID in
+            guard let self else { return }
+            self.runFilters = RunFilters()
+            self.reloadRuns()
+            self.focusedRunID = runID
+            self.section = .history
+            self.bringForward()
+        }
+        host.openWorkflowAt = { [weak self] workflowID, nodeID in
+            guard let self else { return }
+            self.reloadWorkflows()
+            if let nodeID {
+                self.openForFixing(workflowID: workflowID, nodeID: nodeID)
+            } else {
+                self.selectedWorkflowID = workflowID
+                self.section = .automations
+            }
+            self.bringForward()
+        }
+        host.showLargestFiles = { [weak self] in
+            self?.orbit?.showLargestFiles()
+            self?.section = .orbit
+            self?.bringForward()
+        }
+        host.showCleanup = { [weak self] in
+            self?.orbit?.tab = .browser
+            self?.section = .orbit
+            self?.bringForward()
+            self?.orbit?.showCleanup = true
+        }
+        host.showReviewQueue = { [weak self] in
+            self?.orbit?.tab = .rules
+            self?.section = .orbit
+            self?.bringForward()
+        }
+        host.showOrbitFolders = { [weak self] in
+            self?.orbit?.tab = .folders
+            self?.section = .orbit
+            self?.bringForward()
+        }
+        host.draftWorkflow = { [weak self] name, bundleIDs in
+            self?.draftWorkflow(named: name, launching: bundleIDs)
+        }
+        host.isPaused = { [weak self] in self?.isPaused ?? false }
+        companion.host = host
+        companion.start()
+    }
+
+    /// Shows the main window, opening it again if it was closed.
+    func bringForward() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true && $0.canBecomeMain }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openMainWindow?()
+        }
+    }
+
+    /// A suggested workflow from repeated app launches: saved turned off and
+    /// opened in the editor for the person to review, rename and keep or delete.
+    private func draftWorkflow(named name: String, launching bundleIDs: [String]) {
+        let workflow = Workflow(
+            name: "Open \(name)",
+            summary: "Suggested by the Companion because you often open these apps together. Review it, then save or delete it.",
+            isEnabled: false,
+            steps: bundleIDs.map { WorkflowStep(actionID: LaunchApplicationAction.id, parameters: ["bundleId": .string($0)]) }
+        )
+        if let saved = save(workflow) {
+            selectedWorkflowID = saved.id
+            section = .automations
+            bringForward()
         }
     }
 

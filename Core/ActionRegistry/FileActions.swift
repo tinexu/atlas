@@ -432,10 +432,68 @@ public struct UndoFileOperationAction: AtlasAction {
 extension AtlasEvent.Name {
     /// Payload: name, seconds. Published by `timer.start` when time is up.
     public static let timerCompleted = "timer.completed"
+    /// Payload: name, seconds, endsAt (seconds since 1970).
+    public static let timerStarted = "timer.started"
+    /// Payload: name. A timer stopped before it finished.
+    public static let timerStopped = "timer.stopped"
+}
+
+/// Timers started by `timer.start` that haven't finished, so they can be
+/// listed (Companion, menu bar) and stopped early.
+public final class TimerCenter: @unchecked Sendable {
+    public struct ActiveTimer: Hashable, Sendable, Identifiable {
+        public let id: UUID
+        public let name: String
+        public let endsAt: Date
+    }
+
+    /// The registry's timers. Tests that need isolation create their own.
+    public static let shared = TimerCenter()
+
+    private let lock = NSLock()
+    private var timers: [UUID: (timer: ActiveTimer, task: Task<Void, Never>)] = [:]
+
+    public init() {}
+
+    public var active: [ActiveTimer] {
+        lock.withLock { timers.values.map(\.timer) }.sorted { $0.endsAt < $1.endsAt }
+    }
+
+    /// Starting a timer with a name that's already running restarts it.
+    @discardableResult
+    func start(name: String, seconds: Double, events: EventBus) -> ActiveTimer {
+        stop(named: name, events: nil)
+        let timer = ActiveTimer(id: UUID(), name: name, endsAt: Date().addingTimeInterval(seconds))
+        let task = Task.detached { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.lock.withLock { _ = self?.timers.removeValue(forKey: timer.id) }
+            events.publish(AtlasEvent(AtlasEvent.Name.timerCompleted, payload: ["name": .string(name), "seconds": .number(seconds)]))
+        }
+        lock.withLock { timers[timer.id] = (timer, task) }
+        events.publish(AtlasEvent(AtlasEvent.Name.timerStarted, payload: [
+            "name": .string(name), "seconds": .number(seconds), "endsAt": .number(timer.endsAt.timeIntervalSince1970),
+        ]))
+        return timer
+    }
+
+    /// Stops every timer with this name (case-insensitive). Returns how many.
+    @discardableResult
+    func stop(named name: String, events: EventBus?) -> Int {
+        let stopped = lock.withLock {
+            let matches = timers.filter { $0.value.timer.name.caseInsensitiveCompare(name) == .orderedSame }
+            matches.keys.forEach { timers.removeValue(forKey: $0) }
+            return matches.values.map(\.task)
+        }
+        stopped.forEach { $0.cancel() }
+        if !stopped.isEmpty { events?.publish(AtlasEvent(AtlasEvent.Name.timerStopped, payload: ["name": .string(name)])) }
+        return stopped.count
+    }
 }
 
 public struct StartTimerAction: AtlasAction {
     public static let id: ActionID = "timer.start"
+    private let center: TimerCenter
 
     public let descriptor = ActionDescriptor(
         id: StartTimerAction.id,
@@ -453,18 +511,55 @@ public struct StartTimerAction: AtlasAction {
         isConcurrencySafe: true
     )
 
-    public init() {}
+    public init(center: TimerCenter = .shared) {
+        self.center = center
+    }
 
     public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
         let name = try parameters.requiredString("name")
         let seconds = parameters["seconds"]?.numberValue ?? 300
-        let events = context.events
-        Task.detached {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            events.publish(AtlasEvent(AtlasEvent.Name.timerCompleted, payload: ["name": .string(name), "seconds": .number(seconds)]))
+        let timer = center.start(name: name, seconds: seconds, events: context.events)
+        return ActionOutput("Started “\(name)” for \(Self.duration(seconds))",
+                            values: ["endsAt": .string(timer.endsAt.formatted(date: .omitted, time: .shortened))])
+    }
+
+    /// "25 min", "90 s", "1 h 30 min".
+    public static func duration(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        if total < 120 { return "\(total) s" }
+        let hours = total / 3_600, minutes = (total % 3_600) / 60
+        if hours == 0 { return "\(minutes) min" }
+        return minutes == 0 ? "\(hours) h" : "\(hours) h \(minutes) min"
+    }
+}
+
+public struct StopTimerAction: AtlasAction {
+    public static let id: ActionID = "timer.stop"
+    private let center: TimerCenter
+
+    public let descriptor = ActionDescriptor(
+        id: StopTimerAction.id,
+        title: "Stop Timer",
+        summary: "Stops a running timer early. Its “Timer completed” automations don't run.",
+        category: "Timing",
+        symbolName: "timer.circle",
+        parameters: [
+            ParameterSpec(key: "name", label: "Timer name", kind: .text, help: "The name it was started with"),
+        ],
+        isIdempotent: true,
+        defaultTimeout: 5,
+        isConcurrencySafe: true
+    )
+
+    public init(center: TimerCenter = .shared) {
+        self.center = center
+    }
+
+    public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
+        let name = try parameters.requiredString("name")
+        guard center.stop(named: name, events: context.events) > 0 else {
+            throw ActionError.failed("No timer called “\(name)” is running.")
         }
-        let end = Date().addingTimeInterval(seconds)
-        return ActionOutput("Started “\(name)” for \(ActionValue.number(seconds).displayString)s",
-                            values: ["endsAt": .string(end.formatted(date: .omitted, time: .shortened))])
+        return ActionOutput("Stopped “\(name)”")
     }
 }
