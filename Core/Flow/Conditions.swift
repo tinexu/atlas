@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 public enum ComparisonOperator: String, Codable, CaseIterable, Sendable {
     case equals, notEquals, lessThan, greaterThan, contains, isEmpty, isNotEmpty
@@ -56,6 +57,12 @@ public enum ConditionCheck: Codable, Hashable, Sendable {
     case fileSize(path: String, op: ComparisonOperator, megabytes: Double)
     case fileNameContains(path: String, text: String)
     case fileNameMatches(path: String, pattern: String)
+    /// Whole days since the file was created or modified, compared with `days`.
+    case fileAge(path: String, field: RuleCondition.DateField, op: ComparisonOperator, days: Int)
+    /// The file's type conforms to a UTType, e.g. "public.image".
+    case fileType(path: String, typeIdentifier: String)
+    /// Where macOS says it came from (download site or creating app) contains the text.
+    case fileSource(path: String, text: String)
     /// "HH:mm"; a range past midnight (22:00–06:00) wraps.
     case timeInRange(start: String, end: String)
     /// 1 = Sunday … 7 = Saturday.
@@ -76,6 +83,9 @@ public enum ConditionCheck: Codable, Hashable, Sendable {
         case .fileSize: return "File size"
         case .fileNameContains: return "File name contains"
         case .fileNameMatches: return "File name matches"
+        case .fileAge: return "File age"
+        case .fileType: return "File kind is"
+        case .fileSource: return "File came from"
         case .timeInRange: return "Time is between"
         case .dayOfWeek: return "Day of week is"
         case .batteryLevel: return "Battery level"
@@ -96,6 +106,9 @@ public enum ConditionCheck: Codable, Hashable, Sendable {
         case .fileSize(_, let op, let mb): return "Size \(op.title) \(ActionValue.number(mb).displayString) MB"
         case .fileNameContains(_, let text): return "Name contains “\(text)”"
         case .fileNameMatches(_, let pattern): return "Name matches /\(pattern)/"
+        case .fileAge(_, let field, let op, let days): return "Days since \(field.rawValue) \(op.title) \(days)"
+        case .fileType(_, let type): return "Kind is \(type)"
+        case .fileSource(_, let text): return "Came from “\(text)”"
         case .timeInRange(let a, let b): return "Between \(a) and \(b)"
         case .dayOfWeek(let days):
             let names = Calendar(identifier: .gregorian).shortWeekdaySymbols
@@ -114,6 +127,9 @@ public enum ConditionCheck: Codable, Hashable, Sendable {
             .fileNameMatches(path: "{{trigger.path}}", pattern: ".*"),
             .fileExists(path: "{{trigger.path}}"),
             .fileSize(path: "{{trigger.path}}", op: .greaterThan, megabytes: 10),
+            .fileAge(path: "{{trigger.path}}", field: .modified, op: .greaterThan, days: 30),
+            .fileType(path: "{{trigger.path}}", typeIdentifier: "public.image"),
+            .fileSource(path: "{{trigger.path}}", text: ""),
             .appRunning(bundleID: "com.apple.Safari"),
             .appFrontmost(bundleID: "com.apple.Safari"),
             .activeSpace(spaceID: UUID(), name: "Space"),
@@ -134,6 +150,8 @@ public enum ConditionCheck: Codable, Hashable, Sendable {
             return TimeOfDay(a) == nil || TimeOfDay(b) == nil ? "Times must look like 09:30." : nil
         case .dayOfWeek(let days):
             return days.isEmpty ? "Pick at least one day." : nil
+        case .fileType(_, let identifier):
+            return identifier.contains("{{") || UTType(identifier) != nil ? nil : "“\(identifier)” isn't a type macOS knows, e.g. public.image."
         default:
             return nil
         }
@@ -261,6 +279,21 @@ public enum ConditionEvaluator {
         case .fileNameMatches(let path, let pattern):
             let name = (r(path) as NSString).lastPathComponent
             return name.range(of: r(pattern), options: [.regularExpression, .caseInsensitive]) != nil
+        case .fileAge(let path, let field, let op, let days):
+            guard let info = context.system.fileInfo(atPath: expand(r(path))),
+                  let date = field == .created ? info.createdAt : info.modifiedAt
+            else { return false }
+            let age = Int(context.now.timeIntervalSince(date) / 86_400)
+            return op.compare(String(age), String(days))
+        case .fileType(let path, let identifier):
+            let path = expand(r(path))
+            guard let info = context.system.fileInfo(atPath: path), let wanted = UTType(r(identifier)) else { return false }
+            let type = info.typeIdentifier.flatMap(UTType.init) ?? UTType(filenameExtension: (path as NSString).pathExtension)
+            return type?.conforms(to: wanted) ?? false
+        case .fileSource(let path, let text):
+            let text = r(text)
+            guard !text.isEmpty, let info = context.system.fileInfo(atPath: expand(r(path))) else { return false }
+            return info.sources.contains { $0.localizedCaseInsensitiveContains(text) }
         case .timeInRange(let start, let end):
             guard let a = TimeOfDay(start), let b = TimeOfDay(end) else { return false }
             let parts = context.calendar.dateComponents([.hour, .minute], from: context.now)

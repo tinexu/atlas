@@ -20,6 +20,8 @@ public enum BuiltInActions {
             RenameFileAction(),
             CreateFolderAction(),
             TrashFileAction(),
+            TagFileAction(),
+            UndoFileOperationAction(),
             StartTimerAction(),
         ]
     }

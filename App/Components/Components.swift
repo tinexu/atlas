@@ -100,6 +100,12 @@ enum Formatting {
         case "window-manager": return "Window Manager"
         case RunTrigger.test: return "Run now (test)"
         case RunTrigger.subworkflow: return "Called by another automation"
+        case "orbit": return "Orbit"
+        case "cleanup": return "Cleanup Review"
+        case "review": return "Approved in the review queue"
+        case "undo": return "Undo from Run History"
+        case "project": return "Project (Space activated)"
+        case "trigger.orbit.sweep": return "Daily rule check"
         default:
             if trigger.hasPrefix(RunTrigger.automaticPrefix) {
                 let type = String(trigger.dropFirst(RunTrigger.automaticPrefix.count))

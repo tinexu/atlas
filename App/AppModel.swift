@@ -1,6 +1,8 @@
 import AppKit
 import AtlasCore
 import AtlasFlow
+import AtlasOrbit
+import AtlasOrbitUI
 import AtlasSpacesUI
 import ServiceManagement
 import SwiftUI
@@ -11,13 +13,15 @@ import UserNotifications
 @MainActor
 final class AppModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case spaces, windows, automations, history, actions, permissions
+        case spaces, windows, orbit, health, automations, history, actions, permissions
         var id: Self { self }
 
         var title: String {
             switch self {
             case .spaces: return "Spaces"
             case .windows: return "Windows"
+            case .orbit: return "Orbit"
+            case .health: return "Mac Health"
             case .automations: return "Automations"
             case .history: return "Run History"
             case .actions: return "Action Library"
@@ -29,6 +33,8 @@ final class AppModel: ObservableObject {
             switch self {
             case .spaces: return "cube.transparent"
             case .windows: return "macwindow.on.rectangle"
+            case .orbit: return "globe.americas"
+            case .health: return "heart.text.square"
             case .automations: return "bolt.horizontal.circle"
             case .history: return "clock.arrow.circlepath"
             case .actions: return "square.grid.2x2"
@@ -59,6 +65,8 @@ final class AppModel: ObservableObject {
     let core: AtlasCore?
     let spaces: SpacesModel
     let windowManager: WindowManagerModel
+    /// Stage 05 Orbit: files and Mac Health. Nil if it couldn't start.
+    let orbit: OrbitViewModel?
     /// One editor per open automation, so drafts and undo survive switching.
     private var editors: [UUID: FlowEditorModel] = [:]
     /// Run History filters.
@@ -79,11 +87,20 @@ final class AppModel: ObservableObject {
             core = nil
             spaces = SpacesModel(core: nil)
             windowManager = WindowManagerModel(core: nil)
+            orbit = nil
             startupError = error.localizedDescription
             return
         }
         spaces = SpacesModel(core: core)
         windowManager = WindowManagerModel(core: core)
+        var orbitError: Error?
+        if let core, let module = try? OrbitModule.live(core: core) {
+            module.start()
+            orbit = OrbitViewModel(module: module)
+        } else {
+            orbit = nil
+            orbitError = ActionError.failed("Orbit couldn't start, so file features are unavailable.")
+        }
         spaces.onError = { [weak self] message in self?.errorMessage = message }
         reloadWorkflows()
         reloadRuns()
@@ -94,6 +111,50 @@ final class AppModel: ObservableObject {
         Task { await refreshPermissions() }
         monitorAccessibility()
         launchesAtLogin = SMAppService.mainApp.status == .enabled
+        connectOrbit()
+        if let orbitError { errorMessage = orbitError.localizedDescription }
+    }
+
+    private func connectOrbit() {
+        guard let orbit else { return }
+        orbit.spaces = { [weak self] in self?.spaces.spaces.map { (id: $0.id, name: $0.name) } ?? [] }
+        orbit.onError = { [weak self] message in self?.errorMessage = message }
+        orbit.openWorkflow = { [weak self] id in
+            guard let self else { return }
+            self.reloadWorkflows()
+            self.selectedWorkflowID = id
+            self.section = .automations
+        }
+    }
+
+    // MARK: - Undo
+
+    /// File changes in a run that can still be undone.
+    func undoableOperations(in run: WorkflowRun) -> [FileOperation] {
+        ((try? core?.store.operations(runID: run.id)) ?? []).filter { $0.kind.isUndoable && $0.undoneAt == nil }
+    }
+
+    /// Reverses a run's file changes, newest first, as one run of its own.
+    func undoFileChanges(of run: WorkflowRun) {
+        guard let core else { return }
+        let operations = undoableOperations(in: run).reversed()
+        guard !operations.isEmpty else { return }
+        let workflow = Workflow(
+            name: "Undo: \(run.workflowName)",
+            summary: "Reverses the file changes made by a run on \(run.startedAt.formatted(date: .abbreviated, time: .shortened)).",
+            failurePolicy: .continueOnFailure,
+            steps: operations.map {
+                WorkflowStep(actionID: UndoFileOperationAction.id, parameters: ["operationId": .string($0.id.uuidString)],
+                             label: "Undo: \($0.summary)")
+            }
+        )
+        Task {
+            let result = await core.engine.run(workflow, trigger: "undo")
+            if result.state != .succeeded {
+                errorMessage = "Some changes couldn't be undone: \(result.error ?? "see Run History for details.")"
+            }
+            reloadRuns()
+        }
     }
 
     // MARK: - Flow editor

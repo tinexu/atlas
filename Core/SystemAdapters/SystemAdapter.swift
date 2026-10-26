@@ -43,6 +43,22 @@ public struct PowerStatus: Sendable, Equatable {
     }
 }
 
+/// What rule conditions can learn about a file without reading it.
+public struct FileInfo: Sendable, Equatable {
+    public var createdAt: Date?
+    public var modifiedAt: Date?
+    public var typeIdentifier: String?
+    /// Where it came from: download URLs and the creating app, as macOS recorded them.
+    public var sources: [String]
+
+    public init(createdAt: Date? = nil, modifiedAt: Date? = nil, typeIdentifier: String? = nil, sources: [String] = []) {
+        self.createdAt = createdAt
+        self.modifiedAt = modifiedAt
+        self.typeIdentifier = typeIdentifier
+        self.sources = sources
+    }
+}
+
 public enum FileKind: Sendable, Equatable {
     case missing
     case file
@@ -99,6 +115,11 @@ public protocol SystemAdapter: Sendable {
     func createFolder(atPath path: String) async throws
     /// Moves an item to the Trash (never deletes outright). Returns where it went.
     func trashItem(atPath path: String) async throws -> String
+    /// Dates, type and origin; nil if nothing is there.
+    func fileInfo(atPath path: String) -> FileInfo?
+    func fileTags(atPath path: String) -> [String]
+    /// Replaces the item's Finder tags.
+    func setFileTags(_ tags: [String], atPath path: String) async throws
     func powerStatus() -> PowerStatus?
     func applicationName(for bundleID: String) -> String?
     func runningApplications() -> [RunningApplication]

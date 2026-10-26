@@ -42,6 +42,7 @@ public enum TriggerCatalog {
     public static let powerConnected = "power.connected"
     public static let powerDisconnected = "power.disconnected"
     public static let woke = "system.woke"
+    public static let healthWarning = "health.threshold"
 
     public static func type(id: String) -> TriggerType? {
         all.first { $0.id == id }
@@ -156,6 +157,19 @@ public enum TriggerCatalog {
         TriggerType(
             id: woke, title: "Mac Woke Up", summary: "When the Mac wakes from sleep.", symbolName: "sunrise",
             reliability: "Fires a moment after wake, once the network and displays are back."
+        ),
+        TriggerType(
+            id: healthWarning, title: "Mac Health Warning", summary: "When a Mac Health warning you set is crossed, like low disk space.",
+            symbolName: "stethoscope",
+            parameters: [ParameterSpec(key: "metric", label: "Warning", kind: .text, isRequired: false, defaultValue: "any",
+                                       options: ["any", "diskFree", "cpu", "memory", "battery"])],
+            outputs: [
+                OutputSpec(key: "metric", label: "Warning", type: .string),
+                OutputSpec(key: "value", label: "Value", type: .number),
+                OutputSpec(key: "threshold", label: "Threshold", type: .number),
+                OutputSpec(key: "message", label: "Description", type: .string),
+            ],
+            reliability: "Set warnings in Mac Health. Each fires once when crossed, and again only after things recover. Needs ATLAS running."
         ),
     ]
 }

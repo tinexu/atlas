@@ -1,5 +1,6 @@
 import AppKit
 import AtlasCore
+import AtlasOrbitUI
 import SwiftUI
 
 /// Explains every authorisation ATLAS can ask for, and why (spec 7.6).
@@ -18,6 +19,17 @@ struct PermissionsView: View {
                         status: model.permissionStatuses[permission] ?? .notDetermined,
                         usedBy: usage(of: permission)
                     )
+                }
+
+                if let orbit = model.orbit {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Orbit Folders", systemImage: "externaldrive").font(.headline)
+                        Text("The only folders Orbit reads, and the only places file actions may change anything.")
+                            .foregroundStyle(.secondary)
+                        LocationsList(model: orbit)
+                    }
+                    .padding(16)
+                    .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
                 }
 
                 if Bundle.main.bundleIdentifier == nil {

@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import CoreServices
 import IOKit.ps
 import UserNotifications
 
@@ -182,6 +183,27 @@ public struct MacSystemAdapter: SystemAdapter {
         var resulting: NSURL?
         try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: &resulting)
         return resulting?.path ?? path
+    }
+
+    public func fileInfo(atPath path: String) -> FileInfo? {
+        let url = URL(fileURLWithPath: path)
+        guard let values = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey, .typeIdentifierKey])
+        else { return nil }
+        var sources: [String] = []
+        if let item = MDItemCreateWithURL(nil, url as CFURL) {
+            if let whereFroms = MDItemCopyAttribute(item, kMDItemWhereFroms) as? [String] { sources += whereFroms }
+            if let creator = MDItemCopyAttribute(item, kMDItemCreator) as? String { sources.append(creator) }
+        }
+        return FileInfo(createdAt: values.creationDate, modifiedAt: values.contentModificationDate,
+                        typeIdentifier: values.typeIdentifier, sources: sources)
+    }
+
+    public func fileTags(atPath path: String) -> [String] {
+        (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []
+    }
+
+    public func setFileTags(_ tags: [String], atPath path: String) async throws {
+        try (URL(fileURLWithPath: path) as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
     }
 
     public func powerStatus() -> PowerStatus? {

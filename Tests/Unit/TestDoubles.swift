@@ -121,13 +121,34 @@ final class MockSystemAdapter: SystemAdapter, @unchecked Sendable {
     func trashItem(atPath path: String) async throws -> String {
         record("trash:\(path)")
         return try lock.synchronized {
-            guard existingPaths[path] != nil else { throw SystemAdapterError.couldNotOpen(path) }
+            guard let kind = existingPaths[path] else { throw SystemAdapterError.couldNotOpen(path) }
             existingPaths[path] = nil
-            return "/Trash/" + (path as NSString).lastPathComponent
+            let trashed = "/Trash/" + (path as NSString).lastPathComponent
+            existingPaths[trashed] = kind
+            return trashed
         }
     }
 
     func powerStatus() -> PowerStatus? { lock.synchronized { power } }
+
+    var fileInfos: [String: FileInfo] = [:]
+    private var tags: [String: [String]] = [:]
+
+    func fileInfo(atPath path: String) -> FileInfo? {
+        lock.synchronized { existingPaths[path] == nil ? nil : (fileInfos[path] ?? FileInfo()) }
+    }
+
+    func fileTags(atPath path: String) -> [String] {
+        lock.synchronized { tags[path] ?? [] }
+    }
+
+    func setFileTags(_ newTags: [String], atPath path: String) async throws {
+        record("tag:\(path)=\(newTags.joined(separator: ","))")
+        try lock.synchronized {
+            guard existingPaths[path] != nil else { throw SystemAdapterError.couldNotOpen(path) }
+            tags[path] = newTags
+        }
+    }
 
     func applicationName(for bundleID: String) -> String? {
         installedApps[bundleID]
@@ -179,7 +200,8 @@ struct TestHarness {
     init(
         system: MockSystemAdapter = MockSystemAdapter(),
         windows: MockWindowAdapter = MockWindowAdapter(),
-        permissions: MockPermissionProvider = MockPermissionProvider()
+        permissions: MockPermissionProvider = MockPermissionProvider(),
+        authorizedFolders: [String] = ["/"]
     ) throws {
         self.store = try AtlasStore.inMemory()
         self.system = system
@@ -187,6 +209,8 @@ struct TestHarness {
         self.permissionProvider = permissions
         windows.system = system
         self.core = AtlasCore(store: store, system: system, permissionProvider: permissions, windowAdapter: windows)
+        // Mock paths aren't real folders; tests about authorized folders narrow this.
+        core.fileAccess.setRoots(authorizedFolders)
         core.windows.windowWaitTimeout = 0.5
         core.windows.pollInterval = 0.02
     }

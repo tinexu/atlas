@@ -96,6 +96,7 @@ private struct RunDetail: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            UndoButton(run: run)
             Button("Show Steps") { showGraph = false }
         }
         .padding(12)
@@ -108,6 +109,7 @@ private struct RunDetail: View {
                     Text(run.workflowName).font(.title2.weight(.semibold))
                     StateBadge(state: run.state)
                     Spacer()
+                    UndoButton(run: run)
                     if model.core.flatMap({ try? $0.store.workflow(id: run.workflowID) }) != nil {
                         Button("Show Graph") { showGraph = true }
                     }
@@ -184,6 +186,30 @@ private struct RunDetail: View {
                 }
             }
             .padding(24)
+        }
+    }
+}
+
+/// Reverses the file changes a run made, when that's still possible.
+private struct UndoButton: View {
+    @EnvironmentObject private var model: AppModel
+    let run: WorkflowRun
+    @State private var confirming = false
+
+    var body: some View {
+        let operations = model.undoableOperations(in: run)
+        if !operations.isEmpty && run.state.isTerminal {
+            Button {
+                confirming = true
+            } label: {
+                Label(operations.count == 1 ? "Undo File Change" : "Undo \(operations.count) File Changes", systemImage: "arrow.uturn.backward")
+            }
+            .help(operations.map(\.summary).joined(separator: "\n"))
+            .confirmationDialog("Undo these changes?", isPresented: $confirming) {
+                Button("Undo") { model.undoFileChanges(of: run) }
+            } message: {
+                Text(operations.map(\.summary).joined(separator: "\n") + "\n\nAnything changed since then is left alone and reported.")
+            }
         }
     }
 }

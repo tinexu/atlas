@@ -587,7 +587,7 @@ final class FlowRunnerTests: XCTestCase {
         h.system.existingPaths["/b/report.pdf"] = .file
 
         let copy = await h.engine.invoke(CopyFileAction.id, parameters: ["path": "/a/report.pdf", "destination": "/b"], source: "test")
-        XCTAssertEqual(copy.steps[0].output["path"], "/b/report 2.pdf", "Never overwrites")
+        XCTAssertEqual(copy.steps[0].output["path"], "/b/report (2).pdf", "Never overwrites")
         let rename = await h.engine.invoke(RenameFileAction.id, parameters: ["path": "/a/report.pdf", "name": "final.pdf"], source: "test")
         XCTAssertEqual(rename.steps[0].output["path"], "/a/final.pdf")
         let folder = await h.engine.invoke(CreateFolderAction.id, parameters: ["path": "/c/d"], source: "test")

@@ -21,7 +21,11 @@ public final class TriggerToken: @unchecked Sendable {
 }
 
 public struct FileChange: Sendable, Hashable {
-    public enum Kind: String, Sendable { case created, modified, removed, renamed }
+    public enum Kind: String, Sendable {
+        case created, modified, removed, renamed
+        /// Too many changes to report one by one: look at everything under `path` again.
+        case rescan
+    }
     public let path: String
     public let kind: Kind
     public let isDirectory: Bool
@@ -283,7 +287,7 @@ public final class TriggerManager: @unchecked Sendable {
         case TriggerCatalog.woke:
             return [environment.observeWake { fire([:]) }]
 
-        case TriggerCatalog.spaceActivated, TriggerCatalog.displayChanged, TriggerCatalog.timerCompleted:
+        case TriggerCatalog.spaceActivated, TriggerCatalog.displayChanged, TriggerCatalog.timerCompleted, TriggerCatalog.healthWarning:
             // Delivered through the event bus; see `handle(_:)`.
             return []
 
@@ -396,6 +400,14 @@ public final class TriggerManager: @unchecked Sendable {
                 let name = p["spaceName"]?.stringValue ?? "", id = p["spaceId"]?.stringValue ?? ""
                 guard wanted.isEmpty || wanted.caseInsensitiveCompare(name) == .orderedSame || wanted == id else { return nil }
                 return ["spaceId": .string(id), "spaceName": .string(name), "profileId": p["profileId"] ?? .string("")]
+            }
+        case AtlasEvent.Name.healthThreshold:
+            deliver(TriggerCatalog.healthWarning) { params in
+                let wanted = params["metric"]?.stringValue ?? "any"
+                let metric = p["metric"]?.stringValue ?? ""
+                guard wanted == "any" || wanted.isEmpty || wanted == metric else { return nil }
+                return ["metric": .string(metric), "value": p["value"] ?? .number(0), "threshold": p["threshold"] ?? .number(0),
+                        "message": p["message"] ?? .string("")]
             }
         case AtlasEvent.Name.displayChanged:
             deliver(TriggerCatalog.displayChanged) { _ in
@@ -565,5 +577,5 @@ struct TriggerError: Error, LocalizedError {
 
 extension AtlasEvent.Name {
     /// Spaces publishes `space.activated`; triggers listen for it here.
-    static let spaceActivatedEvent = "space.activated"
+    public static let spaceActivatedEvent = "space.activated"
 }

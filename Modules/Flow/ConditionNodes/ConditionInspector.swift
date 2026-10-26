@@ -124,6 +124,26 @@ private struct ConditionItemEditor: View {
         case .fileNameMatches(let path, let pattern):
             TextField("Path", text: text(path) { .fileNameMatches(path: $0, pattern: pattern) })
             TextField("Regular expression", text: text(pattern) { .fileNameMatches(path: path, pattern: $0) }).font(.body.monospaced())
+        case .fileAge(let path, let field, let o, let days):
+            TextField("Path", text: text(path) { .fileAge(path: $0, field: field, op: o, days: days) })
+            HStack {
+                Picker("", selection: Binding(get: { field }, set: { set(.fileAge(path: path, field: $0, op: o, days: days)) })) {
+                    Text("Days since created").tag(RuleCondition.DateField.created)
+                    Text("Days since modified").tag(RuleCondition.DateField.modified)
+                }
+                .labelsHidden()
+                .fixedSize()
+                op(o) { .fileAge(path: path, field: field, op: $0, days: days) }
+                TextField("Days", value: Binding(get: { days }, set: { set(.fileAge(path: path, field: field, op: o, days: $0)) }),
+                          format: .number)
+                    .frame(width: 60)
+            }
+        case .fileType(let path, let identifier):
+            TextField("Path", text: text(path) { .fileType(path: $0, typeIdentifier: identifier) })
+            TextField("Type, e.g. public.image", text: text(identifier) { .fileType(path: path, typeIdentifier: $0) }).font(.body.monospaced())
+        case .fileSource(let path, let t):
+            TextField("Path", text: text(path) { .fileSource(path: $0, text: t) })
+            TextField("Site or app, e.g. github.com", text: text(t) { .fileSource(path: path, text: $0) })
         case .timeInRange(let a, let b):
             HStack {
                 TextField("From", text: text(a) { .timeInRange(start: $0, end: b) }).frame(width: 70)

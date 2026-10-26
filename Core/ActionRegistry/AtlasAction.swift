@@ -61,11 +61,14 @@ public struct ActionContext: Sendable {
     public let system: SystemAdapter
     public let events: EventBus
     public let runID: UUID?
+    /// Where file actions may write, and the undo log (Stage 05).
+    public let files: FileServices
 
-    public init(system: SystemAdapter, events: EventBus, runID: UUID?) {
+    public init(system: SystemAdapter, events: EventBus, runID: UUID?, files: FileServices = .none) {
         self.system = system
         self.events = events
         self.runID = runID
+        self.files = files
     }
 }
 

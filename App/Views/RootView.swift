@@ -1,4 +1,5 @@
 import AtlasCore
+import AtlasOrbitUI
 import AtlasSpacesUI
 import SwiftUI
 
@@ -28,6 +29,10 @@ struct RootView: View {
                         spaceName: { id in model.spaces.space(id: id)?.name },
                         openPermissions: { model.section = .permissions }
                     )
+                case .orbit:
+                    if let orbit = model.orbit { OrbitView(model: orbit) } else { unavailable("Orbit") }
+                case .health:
+                    if let orbit = model.orbit { HealthView(model: orbit) } else { unavailable("Mac Health") }
                 case .automations: AutomationsView()
                 case .history: RunHistoryView()
                 case .actions: ActionLibraryView()
@@ -58,7 +63,13 @@ struct RootView: View {
             } message: {
                 Text(model.errorMessage ?? "")
             }
+            .onReceive(NotificationCenter.default.publisher(for: .orbitOpenHealth)) { _ in model.section = .health }
         }
+    }
+
+    private func unavailable(_ name: String) -> some View {
+        ContentUnavailableView("\(name) isn't available", systemImage: "exclamationmark.triangle",
+                               description: Text("It couldn't start. Restart ATLAS to try again."))
     }
 
     private var sectionSelection: Binding<AppModel.Section?> {

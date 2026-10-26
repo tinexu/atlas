@@ -77,16 +77,23 @@ public final class MacTriggerEnvironment: TriggerEnvironment, @unchecked Sendabl
     }
 }
 
-/// One FSEvents stream with file-level events.
-private final class FolderWatcher: @unchecked Sendable {
+/// One FSEvents stream with file-level events: direct children of the
+/// folder, or (recursive) anything inside it.
+final class FolderWatcher: @unchecked Sendable {
     let path: String
+    let recursive: Bool
+    let latency: CFTimeInterval
     let handler: @Sendable ([FileChange]) -> Void
     private var stream: FSEventStreamRef?
-    private let queue = DispatchQueue(label: "atlas.folder-watcher")
+    private let queue: DispatchQueue
 
-    init(path: String, handler: @escaping @Sendable ([FileChange]) -> Void) {
+    init(path: String, recursive: Bool = false, latency: CFTimeInterval = 0.5, qos: DispatchQoS = .default,
+         handler: @escaping @Sendable ([FileChange]) -> Void) {
         self.path = path
+        self.recursive = recursive
+        self.latency = latency
         self.handler = handler
+        self.queue = DispatchQueue(label: "atlas.folder-watcher", qos: qos)
     }
 
     func start() -> Bool {
@@ -100,26 +107,36 @@ private final class FolderWatcher: @unchecked Sendable {
             for index in 0..<min(count, list.count) {
                 let flag = Int(flags[index])
                 func has(_ value: Int) -> Bool { flag & value != 0 }
+                let path = list[index].count > 1 && list[index].hasSuffix("/") ? String(list[index].dropLast()) : list[index]
+                if has(kFSEventStreamEventFlagMustScanSubDirs) || has(kFSEventStreamEventFlagUserDropped)
+                    || has(kFSEventStreamEventFlagKernelDropped) {
+                    if watcher.recursive { changes.append(FileChange(path: path, kind: .rescan, isDirectory: true)) }
+                    continue
+                }
                 let isDirectory = has(kFSEventStreamEventFlagItemIsDir)
                 let kind: FileChange.Kind
-                if has(kFSEventStreamEventFlagItemRemoved) && !FileManager.default.fileExists(atPath: list[index]) {
+                if has(kFSEventStreamEventFlagItemRemoved) && !FileManager.default.fileExists(atPath: path) {
                     kind = .removed
                 } else if has(kFSEventStreamEventFlagItemRenamed) {
-                    kind = FileManager.default.fileExists(atPath: list[index]) ? .renamed : .removed
+                    kind = FileManager.default.fileExists(atPath: path) ? .renamed : .removed
                 } else if has(kFSEventStreamEventFlagItemCreated) {
                     kind = .created
                 } else {
                     kind = .modified
                 }
-                // Only direct children of the watched folder.
-                guard (list[index] as NSString).deletingLastPathComponent == watcher.path else { continue }
-                changes.append(FileChange(path: list[index], kind: kind, isDirectory: isDirectory))
+                if watcher.recursive {
+                    guard FileLocation.isPath(path, inside: watcher.path), path != watcher.path else { continue }
+                } else {
+                    // Only direct children of the watched folder.
+                    guard (path as NSString).deletingLastPathComponent == watcher.path else { continue }
+                }
+                changes.append(FileChange(path: path, kind: kind, isDirectory: isDirectory))
             }
             if !changes.isEmpty { watcher.handler(changes) }
         }
         let flags = FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents)
         guard let stream = FSEventStreamCreate(nil, callback, &context, [path] as CFArray,
-                                               FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.5, flags)
+                                               FSEventStreamEventId(kFSEventStreamEventIdSinceNow), latency, flags)
         else { return false }
         self.stream = stream
         FSEventStreamSetDispatchQueue(stream, queue)

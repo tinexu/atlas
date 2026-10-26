@@ -207,6 +207,130 @@ enum Schema {
             JOIN workflow_node b ON b.workflow_id = a.workflow_id AND b.position = a.position + 1
         );
         """,
+
+        // v5 — Stage 05: Orbit. The file index covers only folders the user
+        // added (file_location); removing a location deletes its index.
+        // file_operation is the undo log for every file change ATLAS makes.
+        // health_sample keeps 7 days of readings at decreasing resolution.
+        """
+        CREATE TABLE file_location (
+            id               TEXT PRIMARY KEY,
+            path             TEXT NOT NULL UNIQUE,
+            name             TEXT NOT NULL,
+            bookmark         BLOB,
+            added_at         REAL NOT NULL,
+            last_indexed_at  REAL,
+            file_count       INTEGER NOT NULL DEFAULT 0,
+            total_size       INTEGER NOT NULL DEFAULT 0,
+            index_state      TEXT NOT NULL DEFAULT 'pending',
+            scan_generation  INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- size and item_count of a folder include everything inside it.
+        CREATE TABLE file_entry (
+            path             TEXT PRIMARY KEY,
+            location_id      TEXT NOT NULL REFERENCES file_location(id) ON DELETE CASCADE,
+            parent           TEXT NOT NULL,
+            name             TEXT NOT NULL,
+            extension        TEXT NOT NULL DEFAULT '',
+            type_identifier  TEXT,
+            category         TEXT NOT NULL DEFAULT 'other',
+            size             INTEGER NOT NULL DEFAULT 0,
+            item_count       INTEGER NOT NULL DEFAULT 0,
+            created_at       REAL,
+            modified_at      REAL,
+            accessed_at      REAL,
+            is_directory     INTEGER NOT NULL DEFAULT 0,
+            is_package       INTEGER NOT NULL DEFAULT 0,
+            inode            INTEGER,
+            scan_generation  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_file_entry_parent ON file_entry(parent);
+        CREATE INDEX idx_file_entry_extension ON file_entry(extension);
+        CREATE INDEX idx_file_entry_size ON file_entry(size);
+        CREATE INDEX idx_file_entry_modified ON file_entry(modified_at);
+        CREATE INDEX idx_file_entry_location ON file_entry(location_id, scan_generation);
+        CREATE INDEX idx_file_entry_inode ON file_entry(inode);
+
+        CREATE TABLE project (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            color           TEXT NOT NULL DEFAULT 'blue',
+            space_id        TEXT,
+            space_behavior  TEXT NOT NULL DEFAULT 'none',
+            created_at      REAL NOT NULL
+        );
+
+        CREATE TABLE project_link (
+            id          TEXT PRIMARY KEY,
+            project_id  TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+            position    INTEGER NOT NULL DEFAULT 0,
+            path        TEXT NOT NULL,
+            is_key      INTEGER NOT NULL DEFAULT 0,
+            is_broken   INTEGER NOT NULL DEFAULT 0,
+            added_at    REAL NOT NULL
+        );
+        CREATE INDEX idx_project_link_project ON project_link(project_id, position);
+        CREATE INDEX idx_project_link_path ON project_link(path);
+
+        -- No foreign key to workflow: the rule regenerates it when saved.
+        CREATE TABLE file_rule (
+            id               TEXT PRIMARY KEY,
+            position         INTEGER NOT NULL DEFAULT 0,
+            name             TEXT NOT NULL,
+            is_enabled       INTEGER NOT NULL DEFAULT 0,
+            mode             TEXT NOT NULL DEFAULT 'automatic',
+            folders_json     TEXT NOT NULL DEFAULT '[]',
+            conditions_json  TEXT NOT NULL DEFAULT '{}',
+            action_json      TEXT NOT NULL,
+            workflow_id      TEXT,
+            starter_id       TEXT,
+            created_at       REAL NOT NULL,
+            updated_at       REAL NOT NULL
+        );
+
+        CREATE TABLE review_item (
+            id             TEXT PRIMARY KEY,
+            path           TEXT NOT NULL,
+            rule_ids_json  TEXT NOT NULL DEFAULT '[]',
+            action_json    TEXT NOT NULL,
+            reason         TEXT NOT NULL DEFAULT '',
+            state          TEXT NOT NULL DEFAULT 'pending',
+            created_at     REAL NOT NULL,
+            resolved_at    REAL,
+            run_id         TEXT
+        );
+        CREATE INDEX idx_review_item_state ON review_item(state, created_at DESC);
+
+        CREATE TABLE file_operation (
+            id            TEXT PRIMARY KEY,
+            run_id        TEXT,
+            kind          TEXT NOT NULL,
+            source        TEXT NOT NULL,
+            destination   TEXT,
+            extra_json    TEXT NOT NULL DEFAULT '{}',
+            performed_at  REAL NOT NULL,
+            undone_at     REAL,
+            undo_note     TEXT
+        );
+        CREATE INDEX idx_file_operation_run ON file_operation(run_id);
+        CREATE INDEX idx_file_operation_time ON file_operation(performed_at DESC);
+
+        -- resolution: seconds each row covers (5 = raw, 60, 900 after downsampling).
+        CREATE TABLE health_sample (
+            taken_at         REAL NOT NULL,
+            resolution       INTEGER NOT NULL DEFAULT 5,
+            cpu              REAL NOT NULL,
+            memory_used      INTEGER NOT NULL,
+            memory_total     INTEGER NOT NULL,
+            memory_pressure  INTEGER NOT NULL DEFAULT 0,
+            disk_free        INTEGER NOT NULL,
+            disk_total       INTEGER NOT NULL,
+            battery          REAL,
+            charging         INTEGER
+        );
+        CREATE INDEX idx_health_sample_time ON health_sample(taken_at);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

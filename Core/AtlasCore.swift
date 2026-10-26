@@ -16,6 +16,10 @@ public final class AtlasCore: @unchecked Sendable {
     /// Starts workflows when their triggers fire (Stage 04). Nil until
     /// `startTriggers(environment:)` is called.
     public private(set) var triggers: TriggerManager?
+    /// The folders file actions may change: those added to Orbit (Stage 05).
+    public let fileAccess: FileAccessPolicy
+    /// Every file change ATLAS makes, for undo.
+    public let fileLog: FileOperationLog
 
     public init(
         store: AtlasStore,
@@ -26,6 +30,10 @@ public final class AtlasCore: @unchecked Sendable {
         events: EventBus = EventBus()
     ) {
         let permissions = PermissionManager(provider: permissionProvider, store: store)
+        let fileAccess = FileAccessPolicy(roots: ((try? store.locations()) ?? []).map(\.path))
+        let fileLog = FileOperationLog(store: store, events: events)
+        self.fileAccess = fileAccess
+        self.fileLog = fileLog
         self.store = store
         self.events = events
         self.registry = registry
@@ -37,7 +45,8 @@ public final class AtlasCore: @unchecked Sendable {
             system: system,
             events: events,
             store: store,
-            windows: windowAdapter
+            windows: windowAdapter,
+            files: FileServices(access: fileAccess, log: fileLog)
         )
         self.windows = WindowService(
             adapter: windowAdapter,
@@ -74,6 +83,11 @@ public final class AtlasCore: @unchecked Sendable {
         return core
     }
     #endif
+
+    /// Call after adding or removing an Orbit location.
+    public func refreshFileAccess() {
+        fileAccess.setRoots(((try? store.locations()) ?? []).map(\.path))
+    }
 
     // MARK: - Workflow management
 

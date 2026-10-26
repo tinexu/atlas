@@ -49,10 +49,14 @@ public actor AutomationEngine {
     private let events: EventBus
     private let store: AtlasStore?
     private let windows: WindowAdapter?
+    private let files: FileServices
 
     private var confirmationHandler: ConfirmationHandler?
     private var activeRuns: [UUID: Task<WorkflowRun, Never>] = [:]
     private var activeWorkflowIDs: [UUID: UUID] = [:]   // runID → workflowID
+    /// Runs whose steps the person already approved in a review screen
+    /// (runID → where), so they aren't asked again step by step.
+    private var preapproved: [UUID: String] = [:]
     public private(set) var isPaused = false
 
     /// Base delay between retry attempts; tests shorten it.
@@ -74,7 +78,8 @@ public actor AutomationEngine {
         system: SystemAdapter,
         events: EventBus,
         store: AtlasStore?,
-        windows: WindowAdapter? = nil
+        windows: WindowAdapter? = nil,
+        files: FileServices = .none
     ) {
         self.registry = registry
         self.permissions = permissions
@@ -82,6 +87,7 @@ public actor AutomationEngine {
         self.events = events
         self.store = store
         self.windows = windows
+        self.files = files
     }
 
     // MARK: - Control
@@ -120,15 +126,21 @@ public actor AutomationEngine {
     ///   - payload: what the trigger reported, available as `{{trigger.<key>}}`.
     ///   - entryNodeID: the trigger node to start from; nil starts at the
     ///     workflow's start node.
+    ///   - approvedIn: set only after the person explicitly confirmed these
+    ///     exact steps in a preview (e.g. Cleanup Review), so steps that
+    ///     need confirmation don't ask again one by one. Never set for
+    ///     automatic runs.
     @discardableResult
     public func start(
         _ workflow: Workflow,
         trigger: String = RunTrigger.manual,
         payload: ActionParameters = [:],
-        entryNodeID: UUID? = nil
+        entryNodeID: UUID? = nil,
+        approvedIn: String? = nil
     ) -> UUID {
         let runID = UUID()
         activeWorkflowIDs[runID] = workflow.id
+        if let approvedIn, !trigger.hasPrefix(RunTrigger.automaticPrefix) { preapproved[runID] = approvedIn }
         activeRuns[runID] = Task {
             await self.execute(workflow, runID: runID, trigger: trigger, payload: payload, entryNodeID: entryNodeID)
         }
@@ -140,9 +152,10 @@ public actor AutomationEngine {
         _ workflow: Workflow,
         trigger: String = RunTrigger.manual,
         payload: ActionParameters = [:],
-        entryNodeID: UUID? = nil
+        entryNodeID: UUID? = nil,
+        approvedIn: String? = nil
     ) async -> WorkflowRun {
-        let runID = start(workflow, trigger: trigger, payload: payload, entryNodeID: entryNodeID)
+        let runID = start(workflow, trigger: trigger, payload: payload, entryNodeID: entryNodeID, approvedIn: approvedIn)
         guard let task = activeRuns[runID] else {
             // Unreachable: start() stores the task synchronously.
             return WorkflowRun(workflowID: workflow.id, workflowName: workflow.name, trigger: trigger, state: .failed)
@@ -172,7 +185,8 @@ public actor AutomationEngine {
     public func invoke(
         _ actionID: ActionID,
         parameters: ActionParameters = [:],
-        source: String
+        source: String,
+        approvedIn: String? = nil
     ) async -> WorkflowRun {
         let title = registry.descriptor(for: actionID)?.title ?? actionID.rawValue
         let workflow = Workflow(
@@ -180,7 +194,7 @@ public actor AutomationEngine {
             summary: "Single action invoked from \(source)",
             steps: [WorkflowStep(actionID: actionID, parameters: parameters)]
         )
-        return await run(workflow, trigger: source)
+        return await run(workflow, trigger: source, approvedIn: approvedIn)
     }
 
     // MARK: - Execution
@@ -191,6 +205,7 @@ public actor AutomationEngine {
         defer {
             activeRuns[runID] = nil
             activeWorkflowIDs[runID] = nil
+            preapproved[runID] = nil
         }
         return await executeGraph(workflow, runID: runID, trigger: trigger, payload: payload, entryNodeID: entryNodeID,
                                   callStack: [workflow.id]).run
@@ -495,7 +510,7 @@ public actor AutomationEngine {
             return .failed(error)
         }
 
-        if descriptor.confirmationRequired {
+        if descriptor.confirmationRequired, preapproved[ctx.run.id] == nil {
             let request = ConfirmationRequest(
                 workflowName: ctx.workflow.name, stepLabel: label(for: step), descriptor: descriptor,
                 parameters: parameters, trigger: ctx.run.trigger
@@ -510,7 +525,7 @@ public actor AutomationEngine {
 
         let timeout = max(0.1, step.timeout ?? descriptor.defaultTimeout)
         let maxAttempts = descriptor.isIdempotent ? 1 + min(max(0, step.maxRetries), Self.maxRetries) : 1
-        let context = ActionContext(system: system, events: events, runID: ctx.run.id)
+        let context = ActionContext(system: system, events: events, runID: ctx.run.id, files: files)
 
         var lastError: Error = ActionError.failed("Did not run.")
         for attempt in 1...maxAttempts {
@@ -521,10 +536,11 @@ public actor AutomationEngine {
                 let output = try await withTimeout(seconds: timeout) {
                     try await action.perform(parameters, context: context)
                 }
+                let approval = descriptor.confirmationRequired ? preapproved[ctx.run.id].map { " (approved in \($0))" } ?? "" : ""
                 return StepOutcome(
                     state: output.partialFailure == nil ? .succeeded : .partiallySucceeded,
                     attempts: attempt,
-                    message: output.message,
+                    message: output.message + approval,
                     error: output.partialFailure,
                     output: output.values
                 )

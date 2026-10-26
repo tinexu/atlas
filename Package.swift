@@ -10,6 +10,8 @@ let package = Package(
         .library(name: "AtlasCore", targets: ["AtlasCore"]),
         .library(name: "AtlasSpaces", targets: ["AtlasSpaces"]),
         .library(name: "AtlasFlow", targets: ["AtlasFlow"]),
+        .library(name: "AtlasOrbit", targets: ["AtlasOrbit"]),
+        .library(name: "AtlasOrbitUI", targets: ["AtlasOrbitUI"]),
     ],
     targets: [
         // Headless foundation: event bus, action registry, permissions,
@@ -46,15 +48,40 @@ let package = Package(
             dependencies: ["AtlasCore", "AtlasSpaces"],
             path: "Modules/Flow"
         ),
+        // Stage 05 Orbit, headless half: the file indexer, search, rules,
+        // duplicate detection, projects, cleanup and Mac Health sampling.
+        // Reads only folders the user added; every change goes through the
+        // engine as a registered action.
+        .target(
+            name: "AtlasOrbit",
+            dependencies: ["AtlasCore"],
+            path: "Modules/Orbit",
+            exclude: ["FileUniverse", "Browser", "FileOrganizer/Views", "Search/Views", "DuplicateDetection/Views",
+                      "SystemHealth/Views", "Workspace/Views"],
+            sources: ["FileIndexer", "Search/Model", "FileOrganizer/Model", "DuplicateDetection/Model", "SystemHealth/Model",
+                      "Workspace/Model"]
+        ),
+        // Stage 05 Orbit, presentation half: the 3D File Universe, the 2D
+        // browser and storage chart, search, rules, duplicates, projects,
+        // folders and Mac Health screens.
+        .target(
+            name: "AtlasOrbitUI",
+            dependencies: ["AtlasOrbit"],
+            path: "Modules/Orbit",
+            exclude: ["FileIndexer", "Search/Model", "FileOrganizer/Model", "DuplicateDetection/Model", "SystemHealth/Model",
+                      "Workspace/Model"],
+            sources: ["FileUniverse", "Browser", "FileOrganizer/Views", "Search/Views", "DuplicateDetection/Views",
+                      "SystemHealth/Views", "Workspace/Views"]
+        ),
         // Native SwiftUI shell.
         .executableTarget(
             name: "ATLAS",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow", "AtlasOrbit", "AtlasOrbitUI"],
             path: "App"
         ),
         .testTarget(
             name: "AtlasCoreTests",
-            dependencies: ["AtlasCore", "AtlasSpaces"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit"],
             path: "Tests/Unit"
         ),
     ]

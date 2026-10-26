@@ -1,11 +1,13 @@
 import Foundation
 
-// Stage 04 file actions. All declare Files & Folders access and that they
-// change files. Nothing here deletes: removing a file means moving it to
-// the Trash, and that asks for confirmation each time.
+// File actions (Stage 04, tightened in Stage 05). All declare Files &
+// Folders access and that they change files, refuse any path outside the
+// folders added to Orbit, never overwrite anything, and record what they
+// did so Run History can undo it. Nothing here deletes: removing a file
+// means moving it to the Trash, and that asks for confirmation each time.
 
 enum FilePaths {
-    /// `folder/name`, or `folder/name 2.ext`, `… 3.ext` if taken, so
+    /// `folder/name`, or `folder/name (2).ext`, `… (3).ext` if taken, so
     /// nothing is ever overwritten.
     static func available(_ name: String, in folder: String, system: SystemAdapter) -> String {
         let base = (name as NSString).deletingPathExtension
@@ -13,11 +15,19 @@ enum FilePaths {
         var candidate = (folder as NSString).appendingPathComponent(name)
         var n = 2
         while system.fileKind(atPath: candidate) != .missing {
-            let numbered = ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"
+            let numbered = ext.isEmpty ? "\(base) (\(n))" : "\(base) (\(n)).\(ext)"
             candidate = (folder as NSString).appendingPathComponent(numbered)
             n += 1
         }
         return candidate
+    }
+
+    /// Where an item called `name` would go in `folder`, or nil to skip
+    /// because the name is taken and the mode says skip.
+    static func destination(_ name: String, in folder: String, mode: ConflictMode, system: SystemAdapter) -> String? {
+        let direct = (folder as NSString).appendingPathComponent(name)
+        if system.fileKind(atPath: direct) == .missing { return direct }
+        return mode == .skip ? nil : available(name, in: folder, system: system)
     }
 
     static func requireExisting(_ path: String, system: SystemAdapter) throws {
@@ -26,11 +36,12 @@ enum FilePaths {
         }
     }
 
-    static func outputs(_ path: String) -> ActionParameters {
+    static func outputs(_ path: String, skipped: Bool = false) -> ActionParameters {
         [
             "path": .string(path),
             "fileName": .string((path as NSString).lastPathComponent),
             "folder": .string((path as NSString).deletingLastPathComponent),
+            "skipped": .bool(skipped),
         ]
     }
 
@@ -38,7 +49,24 @@ enum FilePaths {
         OutputSpec(key: "path", label: "New path", type: .filePath),
         OutputSpec(key: "fileName", label: "File name", type: .string),
         OutputSpec(key: "folder", label: "Folder", type: .filePath),
+        OutputSpec(key: "skipped", label: "Skipped (name taken)", type: .bool),
     ]
+
+    static let ifExistsSpec = ParameterSpec(
+        key: "ifExists", label: "If the name is taken", kind: .text, isRequired: false, defaultValue: "addNumber",
+        options: ConflictMode.allCases.map(\.rawValue)
+    )
+
+    static func conflictMode(_ parameters: ActionParameters) -> ConflictMode {
+        parameters["ifExists"]?.stringValue.flatMap(ConflictMode.init(rawValue:)) ?? .addNumber
+    }
+}
+
+extension ActionContext {
+    /// Records a file change for undo.
+    func log(_ kind: FileOperation.Kind, _ source: String, to destination: String? = nil, extra: [String: String] = [:]) {
+        files.log?.record(FileOperation(runID: runID, kind: kind, source: source, destination: destination, extra: extra))
+    }
 }
 
 public struct MoveFileAction: AtlasAction {
@@ -47,7 +75,7 @@ public struct MoveFileAction: AtlasAction {
     public let descriptor = ActionDescriptor(
         id: MoveFileAction.id,
         title: "Move File",
-        summary: "Moves a file or folder into another folder. If the name is taken there, adds a number instead of replacing anything.",
+        summary: "Moves a file or folder into another folder. If the name is taken there, adds a number or skips it, never replacing anything.",
         category: "Links & Files",
         symbolName: "folder.badge.plus",
         parameters: [
@@ -55,6 +83,7 @@ public struct MoveFileAction: AtlasAction {
             ParameterSpec(key: "destination", label: "To folder", kind: .folderPath),
             ParameterSpec(key: "createFolder", label: "Create the folder if needed", kind: .boolean,
                           isRequired: false, defaultValue: true),
+            FilePaths.ifExistsSpec,
         ],
         permissions: [.fileAccess],
         sideEffects: [.modifiesFiles],
@@ -69,6 +98,8 @@ public struct MoveFileAction: AtlasAction {
     public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
         let path = try parameters.path("path")
         let folder = try parameters.path("destination")
+        try context.files.access.require(path)
+        try context.files.access.require(folder, label: "Folder")
         try FilePaths.requireExisting(path, system: context.system)
         switch context.system.fileKind(atPath: folder) {
         case .file:
@@ -78,15 +109,23 @@ public struct MoveFileAction: AtlasAction {
                 throw ActionError.failed("The folder \(folder) doesn't exist.")
             }
             try await context.system.createFolder(atPath: folder)
+            context.log(.createFolder, folder)
         case .directory:
             break
         }
-        let destination = FilePaths.available((path as NSString).lastPathComponent, in: folder, system: context.system)
+        let name = (path as NSString).lastPathComponent
+        if (path as NSString).deletingLastPathComponent == FileLocation.normalize(folder) {
+            return ActionOutput("\(name) is already in \((folder as NSString).lastPathComponent)", values: FilePaths.outputs(path))
+        }
+        guard let destination = FilePaths.destination(name, in: folder, mode: FilePaths.conflictMode(parameters), system: context.system) else {
+            return ActionOutput("Skipped \(name): \((folder as NSString).lastPathComponent) already has a file with that name",
+                                values: FilePaths.outputs(path, skipped: true))
+        }
         try await context.system.moveItem(atPath: path, toPath: destination)
+        context.log(.move, path, to: destination)
         context.reportEffect(.file, path)
         context.reportEffect(.file, destination)
-        return ActionOutput("Moved \((path as NSString).lastPathComponent) to \((folder as NSString).lastPathComponent)",
-                            values: FilePaths.outputs(destination))
+        return ActionOutput("Moved \(name) to \((folder as NSString).lastPathComponent)", values: FilePaths.outputs(destination))
     }
 }
 
@@ -96,7 +135,7 @@ public struct CopyFileAction: AtlasAction {
     public let descriptor = ActionDescriptor(
         id: CopyFileAction.id,
         title: "Copy File",
-        summary: "Copies a file or folder into another folder, adding a number if the name is taken.",
+        summary: "Copies a file or folder into another folder, adding a number or skipping it if the name is taken.",
         category: "Links & Files",
         symbolName: "doc.on.doc",
         parameters: [
@@ -104,6 +143,7 @@ public struct CopyFileAction: AtlasAction {
             ParameterSpec(key: "destination", label: "To folder", kind: .folderPath),
             ParameterSpec(key: "createFolder", label: "Create the folder if needed", kind: .boolean,
                           isRequired: false, defaultValue: true),
+            FilePaths.ifExistsSpec,
         ],
         permissions: [.fileAccess],
         sideEffects: [.modifiesFiles],
@@ -118,18 +158,25 @@ public struct CopyFileAction: AtlasAction {
     public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
         let path = try parameters.path("path")
         let folder = try parameters.path("destination")
+        try context.files.access.require(path)
+        try context.files.access.require(folder, label: "Folder")
         try FilePaths.requireExisting(path, system: context.system)
         if context.system.fileKind(atPath: folder) == .missing {
             guard parameters["createFolder"]?.boolValue ?? true else {
                 throw ActionError.failed("The folder \(folder) doesn't exist.")
             }
             try await context.system.createFolder(atPath: folder)
+            context.log(.createFolder, folder)
         }
-        let destination = FilePaths.available((path as NSString).lastPathComponent, in: folder, system: context.system)
+        let name = (path as NSString).lastPathComponent
+        guard let destination = FilePaths.destination(name, in: folder, mode: FilePaths.conflictMode(parameters), system: context.system) else {
+            return ActionOutput("Skipped \(name): \((folder as NSString).lastPathComponent) already has a file with that name",
+                                values: FilePaths.outputs(path, skipped: true))
+        }
         try await context.system.copyItem(atPath: path, toPath: destination)
+        context.log(.copy, path, to: destination)
         context.reportEffect(.file, destination)
-        return ActionOutput("Copied \((path as NSString).lastPathComponent) to \((folder as NSString).lastPathComponent)",
-                            values: FilePaths.outputs(destination))
+        return ActionOutput("Copied \(name) to \((folder as NSString).lastPathComponent)", values: FilePaths.outputs(destination))
     }
 }
 
@@ -145,6 +192,7 @@ public struct RenameFileAction: AtlasAction {
         parameters: [
             ParameterSpec(key: "path", label: "File", kind: .filePath),
             ParameterSpec(key: "name", label: "New name", kind: .text, help: "e.g. Invoice {{trigger.fileName}}"),
+            FilePaths.ifExistsSpec,
         ],
         permissions: [.fileAccess],
         sideEffects: [.modifiesFiles],
@@ -158,18 +206,30 @@ public struct RenameFileAction: AtlasAction {
     public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
         let path = try parameters.path("path")
         let name = try parameters.requiredString("name").trimmingCharacters(in: .whitespaces)
-        guard !name.contains("/"), name != ".", name != ".." else {
+        guard !name.contains("/"), name != ".", name != "..", !name.isEmpty else {
             throw ActionError.invalidParameter("New name", reason: "a name can't contain “/”")
         }
+        try context.files.access.require(path)
         try FilePaths.requireExisting(path, system: context.system)
-        let destination = ((path as NSString).deletingLastPathComponent as NSString).appendingPathComponent(name)
-        guard context.system.fileKind(atPath: destination) == .missing else {
-            throw ActionError.failed("Something called “\(name)” is already in that folder.")
+        if (path as NSString).lastPathComponent == name {
+            return ActionOutput("Already called \(name)", values: FilePaths.outputs(path))
+        }
+        let folder = (path as NSString).deletingLastPathComponent
+        // A change of case only ("report.pdf" → "Report.pdf") is the same item on macOS.
+        let caseOnly = (path as NSString).lastPathComponent.lowercased() == name.lowercased()
+        let destination: String
+        if caseOnly {
+            destination = (folder as NSString).appendingPathComponent(name)
+        } else if let free = FilePaths.destination(name, in: folder, mode: FilePaths.conflictMode(parameters), system: context.system) {
+            destination = free
+        } else {
+            return ActionOutput("Skipped: something called “\(name)” is already in that folder", values: FilePaths.outputs(path, skipped: true))
         }
         try await context.system.moveItem(atPath: path, toPath: destination)
+        context.log(.rename, path, to: destination)
         context.reportEffect(.file, path)
         context.reportEffect(.file, destination)
-        return ActionOutput("Renamed to \(name)", values: FilePaths.outputs(destination))
+        return ActionOutput("Renamed to \((destination as NSString).lastPathComponent)", values: FilePaths.outputs(destination))
     }
 }
 
@@ -196,6 +256,7 @@ public struct CreateFolderAction: AtlasAction {
 
     public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
         let path = try parameters.path("path")
+        try context.files.access.require(path, label: "Folder")
         switch context.system.fileKind(atPath: path) {
         case .directory:
             return ActionOutput("\((path as NSString).lastPathComponent) already exists", values: ["path": .string(path)])
@@ -203,6 +264,7 @@ public struct CreateFolderAction: AtlasAction {
             throw ActionError.failed("\(path) is a file, not a folder.")
         case .missing:
             try await context.system.createFolder(atPath: path)
+            context.log(.createFolder, path)
             context.reportEffect(.file, path)
             return ActionOutput("Created \((path as NSString).lastPathComponent)", values: ["path": .string(path)])
         }
@@ -215,7 +277,7 @@ public struct TrashFileAction: AtlasAction {
     public let descriptor = ActionDescriptor(
         id: TrashFileAction.id,
         title: "Move to Trash",
-        summary: "Moves a file or folder to the Trash. You confirm each time, and you can put it back from the Trash.",
+        summary: "Moves a file or folder to the Trash. You confirm each time, and you can put it back from the Trash or undo it in Run History.",
         category: "Links & Files",
         symbolName: "trash",
         parameters: [
@@ -233,10 +295,137 @@ public struct TrashFileAction: AtlasAction {
 
     public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
         let path = try parameters.path("path")
+        try context.files.access.require(path)
         try FilePaths.requireExisting(path, system: context.system)
         let trashed = try await context.system.trashItem(atPath: path)
+        context.log(.trash, path, to: trashed)
         context.reportEffect(.file, path)
         return ActionOutput("Moved \((path as NSString).lastPathComponent) to the Trash", values: ["trashPath": .string(trashed)])
+    }
+}
+
+public struct TagFileAction: AtlasAction {
+    public static let id: ActionID = "file.tag"
+
+    public let descriptor = ActionDescriptor(
+        id: TagFileAction.id,
+        title: "Tag File",
+        summary: "Adds Finder tags to a file or folder, keeping the tags it already has unless you choose to replace them.",
+        category: "Links & Files",
+        symbolName: "tag",
+        parameters: [
+            ParameterSpec(key: "path", label: "File", kind: .filePath),
+            ParameterSpec(key: "tags", label: "Tags", kind: .text, help: "Comma-separated, e.g. Work, Red"),
+            ParameterSpec(key: "replace", label: "Replace existing tags", kind: .boolean, isRequired: false, defaultValue: false),
+        ],
+        permissions: [.fileAccess],
+        sideEffects: [.modifiesFiles],
+        isIdempotent: true,
+        defaultTimeout: 10,
+        outputs: [
+            OutputSpec(key: "path", label: "Path", type: .filePath),
+            OutputSpec(key: "tags", label: "Tags", type: .string),
+        ]
+    )
+
+    public init() {}
+
+    static func split(_ text: String) -> [String] {
+        text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
+        let path = try parameters.path("path")
+        let wanted = Self.split(try parameters.requiredString("tags"))
+        guard !wanted.isEmpty else { throw ActionError.invalidParameter("Tags", reason: "add at least one tag") }
+        try context.files.access.require(path)
+        try FilePaths.requireExisting(path, system: context.system)
+        let previous = context.system.fileTags(atPath: path)
+        var tags = parameters["replace"]?.boolValue == true ? [] : previous
+        for tag in wanted where !tags.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) { tags.append(tag) }
+        guard tags != previous else {
+            return ActionOutput("\((path as NSString).lastPathComponent) already has those tags",
+                                values: ["path": .string(path), "tags": .string(tags.joined(separator: ", "))])
+        }
+        try await context.system.setFileTags(tags, atPath: path)
+        context.log(.tag, path, extra: ["previous": previous.joined(separator: ","), "tags": tags.joined(separator: ", ")])
+        return ActionOutput("Tagged \((path as NSString).lastPathComponent): \(tags.joined(separator: ", "))",
+                            values: ["path": .string(path), "tags": .string(tags.joined(separator: ", "))])
+    }
+}
+
+/// Reverses one recorded file change: moves and renames go back, trashed
+/// items come back out of the Trash, tags are restored. Says plainly when
+/// that's no longer possible instead of guessing.
+public struct UndoFileOperationAction: AtlasAction {
+    public static let id: ActionID = "file.undo"
+
+    public let descriptor = ActionDescriptor(
+        id: UndoFileOperationAction.id,
+        title: "Undo File Change",
+        summary: "Reverses a move, rename, Move to Trash or tag change ATLAS made, if nothing has changed since.",
+        category: "Links & Files",
+        symbolName: "arrow.uturn.backward",
+        parameters: [
+            ParameterSpec(key: "operationId", label: "Change", kind: .text, help: "From Run History"),
+        ],
+        permissions: [.fileAccess],
+        sideEffects: [.modifiesFiles],
+        isIdempotent: false,
+        defaultTimeout: 30,
+        outputs: [OutputSpec(key: "path", label: "Restored path", type: .filePath)]
+    )
+
+    public init() {}
+
+    public func perform(_ parameters: ActionParameters, context: ActionContext) async throws -> ActionOutput {
+        guard let id = UUID(uuidString: try parameters.requiredString("operationId")),
+              let log = context.files.log, var operation = log.operation(id: id)
+        else { throw ActionError.failed("That change isn't in the undo log any more.") }
+        guard operation.undoneAt == nil else { throw ActionError.failed("“\(operation.summary)” was already undone.") }
+        guard operation.kind.isUndoable else {
+            throw ActionError.failed("“\(operation.summary)” can't be undone automatically: undoing it would mean removing something. Move it to the Trash yourself if you don't want it.")
+        }
+        let system = context.system
+        let message: String
+        let restored: String
+        switch operation.kind {
+        case .move, .rename, .trash:
+            guard let current = operation.destination else { throw ActionError.failed("No record of where it went.") }
+            let original = operation.source
+            guard system.fileKind(atPath: current) != .missing else {
+                let place = operation.kind == .trash ? "in the Trash (it may have been emptied)" : "at \(current.abbreviatedPath)"
+                throw ActionError.failed("Can't undo: \((original as NSString).lastPathComponent) is no longer \(place).")
+            }
+            guard system.fileKind(atPath: original) == .missing else {
+                throw ActionError.failed("Can't undo: something new is already at \(original.abbreviatedPath), and ATLAS never replaces files.")
+            }
+            try context.files.access.require(original, label: "Original location")
+            if operation.kind != .trash { try context.files.access.require(current) }
+            let folder = (original as NSString).deletingLastPathComponent
+            if system.fileKind(atPath: folder) == .missing { try await system.createFolder(atPath: folder) }
+            try await system.moveItem(atPath: current, toPath: original)
+            context.log(operation.kind == .rename ? .rename : .move, current, to: original, extra: ["undoOf": operation.id.uuidString])
+            context.reportEffect(.file, current)
+            context.reportEffect(.file, original)
+            restored = original
+            message = operation.kind == .trash
+                ? "Put \((original as NSString).lastPathComponent) back from the Trash"
+                : "Put \((original as NSString).lastPathComponent) back in \(folder.abbreviatedPath)"
+        case .tag:
+            try context.files.access.require(operation.source)
+            try FilePaths.requireExisting(operation.source, system: system)
+            let previous = TagFileAction.split(operation.extra["previous"] ?? "")
+            try await system.setFileTags(previous, atPath: operation.source)
+            restored = operation.source
+            message = previous.isEmpty ? "Removed the tags ATLAS added" : "Restored tags: \(previous.joined(separator: ", "))"
+        case .copy, .createFolder:
+            throw ActionError.failed("This kind of change can't be undone.")
+        }
+        operation.undoneAt = Date()
+        operation.undoNote = message
+        log.record(operation)
+        return ActionOutput(message, values: ["path": .string(restored)])
     }
 }
 
