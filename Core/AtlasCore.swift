@@ -20,6 +20,12 @@ public final class AtlasCore: @unchecked Sendable {
     public let fileAccess: FileAccessPolicy
     /// Every file change ATLAS makes, for undo.
     public let fileLog: FileOperationLog
+    /// Time Architect (Stage 07). Nil until `startScheduling(environment:)`.
+    public private(set) var time: TimeServices?
+
+    func setTime(_ services: TimeServices) {
+        time = services
+    }
 
     public init(
         store: AtlasStore,
@@ -79,7 +85,9 @@ public final class AtlasCore: @unchecked Sendable {
         )
         try core.seedSampleWorkflowsIfNeeded()
         core.windows.startObservingDisplays()
-        core.startTriggers(environment: MacTriggerEnvironment())
+        let environment = MacTriggerEnvironment()
+        core.startTriggers(environment: environment)
+        core.startScheduling(environment: environment, calendarStore: EventKitCalendarStore())
         return core
     }
     #endif

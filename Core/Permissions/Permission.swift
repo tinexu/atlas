@@ -7,6 +7,7 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
     case automation
     case notifications
     case fileAccess
+    case calendar
 
     public var id: String { rawValue }
 
@@ -16,6 +17,7 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
         case .automation: return "Automation (Apple Events)"
         case .notifications: return "Notifications"
         case .fileAccess: return "Files & Folders"
+        case .calendar: return "Calendars"
         }
     }
 
@@ -25,6 +27,7 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
         case .automation: return "gearshape.2"
         case .notifications: return "bell.badge"
         case .fileAccess: return "folder"
+        case .calendar: return "calendar"
         }
     }
 
@@ -39,6 +42,8 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
             return "Lets workflows tell you when something finished or needs your attention."
         case .fileAccess:
             return "ATLAS only touches files and folders you point it at. macOS asks the first time ATLAS reaches into protected places like Desktop, Documents or Downloads."
+        case .calendar:
+            return "Lets Time Architect show your calendar events on the timeline and suggest the right Space before a meeting. Asked only when you turn calendar integration on. ATLAS reads the calendars you pick and never changes them unless you allow writing for a specific calendar."
         }
     }
 
@@ -60,6 +65,8 @@ public enum Permission: String, Codable, CaseIterable, Sendable, Identifiable {
             return URL(string: "x-apple.systempreferences:com.apple.preference.notifications")
         case .fileAccess:
             return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")
+        case .calendar:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
         }
     }
 }

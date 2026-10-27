@@ -378,6 +378,103 @@ enum Schema {
         );
         CREATE INDEX idx_app_launch_time ON app_launch(launched_at);
         """,
+        // v7 — Stage 07: Time Architect. Blocks and what happened to each
+        // occurrence; focus sessions; calendar links, rules and the write log;
+        // recommendations shown (and how they were answered); and drafts of
+        // generated workflows with the assumptions behind them.
+        """
+        CREATE TABLE schedule_block (
+            id                      TEXT PRIMARY KEY,
+            title                   TEXT NOT NULL,
+            start_at                REAL NOT NULL,
+            end_at                  REAL NOT NULL,
+            kind                    TEXT NOT NULL DEFAULT 'focus',
+            color                   TEXT,
+            space_id                TEXT,
+            profile_id              TEXT,
+            workflow_id             TEXT,
+            project_id              TEXT,
+            recurrence              TEXT NOT NULL DEFAULT 'none',
+            reminder_minutes        INTEGER,
+            start_behavior          TEXT NOT NULL DEFAULT 'nothing',
+            end_behavior            TEXT NOT NULL DEFAULT 'nothing',
+            end_space_id            TEXT,
+            missed_policy           TEXT NOT NULL DEFAULT 'runIfStillInBlock',
+            source                  TEXT NOT NULL DEFAULT 'atlas',
+            external_event_id       TEXT,
+            calendar_id             TEXT,
+            automation_workflow_id  TEXT,
+            notes                   TEXT NOT NULL DEFAULT '',
+            created_at              REAL NOT NULL,
+            updated_at              REAL NOT NULL
+        );
+        CREATE INDEX idx_schedule_block_start ON schedule_block(start_at);
+        CREATE INDEX idx_schedule_block_event ON schedule_block(external_event_id);
+
+        CREATE TABLE block_occurrence (
+            block_id      TEXT NOT NULL,
+            starts_at     REAL NOT NULL,
+            state         TEXT NOT NULL DEFAULT 'upcoming',
+            run_ids_json  TEXT NOT NULL DEFAULT '[]',
+            updated_at    REAL NOT NULL,
+            PRIMARY KEY (block_id, starts_at)
+        );
+
+        CREATE TABLE focus_session (
+            id                TEXT PRIMARY KEY,
+            block_id          TEXT,
+            title             TEXT NOT NULL DEFAULT 'Focus',
+            planned_seconds   REAL NOT NULL,
+            extended_seconds  REAL NOT NULL DEFAULT 0,
+            started_at        REAL NOT NULL,
+            ended_at          REAL,
+            pauses_json       TEXT NOT NULL DEFAULT '[]',
+            space_id          TEXT,
+            state             TEXT NOT NULL DEFAULT 'running'
+        );
+        CREATE INDEX idx_focus_session_start ON focus_session(started_at DESC);
+
+        -- kind: rule (title contains → Space), event (one event → Space), write (an event ATLAS created).
+        CREATE TABLE calendar_link (
+            id              TEXT PRIMARY KEY,
+            kind            TEXT NOT NULL,
+            calendar_id     TEXT,
+            event_id        TEXT,
+            title_contains  TEXT,
+            space_id        TEXT,
+            profile_id      TEXT,
+            minutes_before  INTEGER NOT NULL DEFAULT 15,
+            block_id        TEXT,
+            note            TEXT NOT NULL DEFAULT '',
+            created_at      REAL NOT NULL,
+            undone_at       REAL
+        );
+
+        CREATE TABLE suggestion_log (
+            id           TEXT PRIMARY KEY,
+            kind         TEXT NOT NULL,
+            title        TEXT NOT NULL,
+            reason       TEXT NOT NULL,
+            confidence   REAL NOT NULL DEFAULT 0.5,
+            state        TEXT NOT NULL DEFAULT 'shown',
+            action_json  TEXT NOT NULL DEFAULT '{}',
+            created_at   REAL NOT NULL,
+            resolved_at  REAL
+        );
+        CREATE INDEX idx_suggestion_log_time ON suggestion_log(created_at DESC);
+
+        CREATE TABLE generated_workflow_draft (
+            id                TEXT PRIMARY KEY,
+            workflow_id       TEXT NOT NULL,
+            prompt            TEXT NOT NULL,
+            summary           TEXT NOT NULL DEFAULT '',
+            assumptions_json  TEXT NOT NULL DEFAULT '[]',
+            source            TEXT NOT NULL,
+            state             TEXT NOT NULL DEFAULT 'draft',
+            created_at        REAL NOT NULL
+        );
+        CREATE INDEX idx_generated_draft_workflow ON generated_workflow_draft(workflow_id);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

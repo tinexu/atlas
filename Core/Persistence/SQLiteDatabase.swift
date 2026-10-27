@@ -247,5 +247,6 @@ extension SQLValue {
     public static func from(_ double: Double?) -> SQLValue { double.map(SQLValue.real) ?? .null }
     public static func from(_ bool: Bool) -> SQLValue { .integer(bool ? 1 : 0) }
     public static func from(_ int: Int) -> SQLValue { .integer(Int64(int)) }
+    public static func from(_ int: Int?) -> SQLValue { int.map { .integer(Int64($0)) } ?? .null }
     public static func from(_ uuid: UUID) -> SQLValue { .text(uuid.uuidString) }
 }

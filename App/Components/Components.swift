@@ -107,6 +107,8 @@ enum Formatting {
         case "project": return "Project (Space activated)"
         case "trigger.orbit.sweep": return "Daily rule check"
         case RunTrigger.companion: return "Companion"
+        case "recommendation": return "Accepted a recommendation"
+        case "focus": return "Focus session ended"
         default:
             if trigger.hasPrefix(RunTrigger.automaticPrefix) {
                 let type = String(trigger.dropFirst(RunTrigger.automaticPrefix.count))

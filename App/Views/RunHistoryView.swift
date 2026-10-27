@@ -82,6 +82,7 @@ private struct RunDetail: View {
     @EnvironmentObject private var model: AppModel
     let run: WorkflowRun
     @State private var showGraph = true
+    @State private var explanation: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -95,6 +96,18 @@ private struct RunDetail: View {
                 stepList
             }
         }
+        .sheet(item: Binding(get: { explanation.map(TextItem.init) }, set: { explanation = $0?.text })) { item in
+            ExplanationSheet(title: "Why did this run fail?", text: item.text)
+        }
+    }
+
+    @ViewBuilder
+    private var whyButton: some View {
+        if [.failed, .partiallySucceeded, .skipped, .canceled].contains(run.state) {
+            Button("Why Did This Fail?") {
+                explanation = WorkflowExplainer.explainFailure(run, workflow: model.workflow(id: run.workflowID))
+            }
+        }
     }
 
     private var header: some View {
@@ -105,6 +118,7 @@ private struct RunDetail: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            whyButton
             UndoButton(run: run)
             Button("Show Steps") { showGraph = false }
         }
@@ -118,6 +132,7 @@ private struct RunDetail: View {
                     Text(run.workflowName).font(.title2.weight(.semibold))
                     StateBadge(state: run.state)
                     Spacer()
+                    whyButton
                     UndoButton(run: run)
                     if model.core.flatMap({ try? $0.store.workflow(id: run.workflowID) }) != nil {
                         Button("Show Graph") { showGraph = true }

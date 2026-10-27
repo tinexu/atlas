@@ -287,7 +287,8 @@ public final class TriggerManager: @unchecked Sendable {
         case TriggerCatalog.woke:
             return [environment.observeWake { fire([:]) }]
 
-        case TriggerCatalog.spaceActivated, TriggerCatalog.displayChanged, TriggerCatalog.timerCompleted, TriggerCatalog.healthWarning:
+        case TriggerCatalog.spaceActivated, TriggerCatalog.displayChanged, TriggerCatalog.timerCompleted, TriggerCatalog.healthWarning,
+             TriggerCatalog.blockStarting, TriggerCatalog.blockEnded, TriggerCatalog.focusEnded, TriggerCatalog.calendarEventApproaching:
             // Delivered through the event bus; see `handle(_:)`.
             return []
 
@@ -413,6 +414,39 @@ public final class TriggerManager: @unchecked Sendable {
             deliver(TriggerCatalog.displayChanged) { _ in
                 ["displayCount": p["displayCount"] ?? .number(0), "profileId": p["profileId"] ?? .string("")]
             }
+        case AtlasEvent.Name.blockStarting, AtlasEvent.Name.blockEnded:
+            let type = event.name == AtlasEvent.Name.blockStarting ? TriggerCatalog.blockStarting : TriggerCatalog.blockEnded
+            let occurrence = "\(p["blockId"]?.stringValue ?? "")|\(p["start"]?.displayString ?? "")|\(p["minutesBefore"]?.displayString ?? "end")"
+            deliver(type, subject: occurrence) { params in
+                let wanted = params["block"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
+                let title = p["title"]?.stringValue ?? "", id = p["blockId"]?.stringValue ?? ""
+                guard wanted.isEmpty || wanted == id || wanted.caseInsensitiveCompare(title) == .orderedSame else { return nil }
+                if type == TriggerCatalog.blockStarting {
+                    let minutes = params["minutesBefore"]?.numberValue ?? 0
+                    guard minutes == (p["minutesBefore"]?.numberValue ?? 0) else { return nil }
+                    let kind = params["kind"]?.stringValue ?? "any"
+                    guard kind == "any" || kind.isEmpty || kind == p["kind"]?.stringValue else { return nil }
+                }
+                return ["blockId": .string(id), "title": .string(title), "spaceName": p["spaceName"] ?? .string(""),
+                        "start": p["start"] ?? .number(0), "end": p["end"] ?? .number(0)]
+            }
+        case AtlasEvent.Name.focusEnded:
+            deliver(TriggerCatalog.focusEnded) { params in
+                let completed = p["completed"]?.boolValue ?? false
+                if params["completedOnly"]?.boolValue == true, !completed { return nil }
+                return ["title": p["title"] ?? .string(""), "elapsedMinutes": p["elapsedMinutes"] ?? .number(0), "completed": .bool(completed)]
+            }
+        case AtlasEvent.Name.calendarEventApproaching:
+            deliver(TriggerCatalog.calendarEventApproaching,
+                    subject: "\(p["eventId"]?.stringValue ?? "")|\(p["start"]?.displayString ?? "")|\(p["minutesBefore"]?.displayString ?? "")") { params in
+                guard (params["minutesBefore"]?.numberValue ?? 10) == (p["minutesBefore"]?.numberValue ?? -1) else { return nil }
+                let calendar = params["calendar"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
+                guard calendar.isEmpty || calendar.caseInsensitiveCompare(p["calendar"]?.stringValue ?? "") == .orderedSame else { return nil }
+                let contains = params["titleContains"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
+                let title = p["title"]?.stringValue ?? ""
+                guard contains.isEmpty || title.localizedCaseInsensitiveContains(contains) else { return nil }
+                return ["title": .string(title), "calendar": p["calendar"] ?? .string(""), "eventId": p["eventId"] ?? .string("")]
+            }
         case AtlasEvent.Name.timerCompleted:
             deliver(TriggerCatalog.timerCompleted) { params in
                 let wanted = params["name"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -426,11 +460,13 @@ public final class TriggerManager: @unchecked Sendable {
     }
 
     /// Fires every listener of an event-bus trigger type whose filter matches.
-    private func deliver(_ type: String, payload: (ActionParameters) -> ActionParameters?) {
+    /// `subject` keeps distinct happenings (another occurrence, another lead
+    /// time) from being taken for a repeat of the same event.
+    private func deliver(_ type: String, subject: String? = nil, payload: (ActionParameters) -> ActionParameters?) {
         let matching = lock.synchronized { listeners.values.filter { $0.type == type } }
         for listener in matching {
             guard let values = payload(listener.parameters) else { continue }
-            Task { await self.fire(workflowID: listener.workflowID, nodeID: listener.nodeID, type: type, payload: values) }
+            Task { await self.fire(workflowID: listener.workflowID, nodeID: listener.nodeID, type: type, payload: values, subject: subject) }
         }
     }
 

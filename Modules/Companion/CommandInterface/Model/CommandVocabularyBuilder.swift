@@ -12,12 +12,13 @@ public enum CommandVocabularyBuilder {
             CommandVocabulary.SpaceEntry(
                 id: space.id, name: space.name,
                 profiles: profiles.filter { $0.spaceID == space.id }.sorted { $0.position < $1.position }
-                    .map { (id: $0.id, name: $0.name, isDefault: $0.isDefault) }
+                    .map { (id: $0.id, name: $0.name, isDefault: $0.isDefault) },
+                templateID: space.templateID
             )
         }
         // Workflows you'd run by name: not a Space's activation or a file rule's plumbing.
         let workflows = ((try? store.workflows()) ?? [])
-            .filter { !profileWorkflowIDs.contains($0.id) && !$0.name.hasPrefix("Rule: ") && !$0.steps.isEmpty }
+            .filter { !profileWorkflowIDs.contains($0.id) && !$0.name.hasPrefix("Rule: ") && !$0.name.hasPrefix("Schedule: ") && !$0.steps.isEmpty }
             .map { CommandVocabulary.Named(id: $0.id.uuidString, name: $0.name) }
         let layouts = ((try? store.windowLayouts()) ?? []).map { CommandVocabulary.Named(id: $0.id.uuidString, name: $0.name) }
         let snapshots = ((try? store.snapshots(limit: 30)) ?? [])

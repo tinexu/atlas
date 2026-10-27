@@ -43,6 +43,10 @@ public enum TriggerCatalog {
     public static let powerDisconnected = "power.disconnected"
     public static let woke = "system.woke"
     public static let healthWarning = "health.threshold"
+    public static let blockStarting = "schedule.blockStarting"
+    public static let blockEnded = "schedule.blockEnded"
+    public static let focusEnded = "focus.ended"
+    public static let calendarEventApproaching = "calendar.eventApproaching"
 
     public static func type(id: String) -> TriggerType? {
         all.first { $0.id == id }
@@ -59,6 +63,12 @@ public enum TriggerCatalog {
         OutputSpec(key: "folder", label: "Folder", type: .filePath),
     ]
     private static let batteryOutput = [OutputSpec(key: "batteryPercent", label: "Battery %", type: .number)]
+    private static let blockOutputs = [
+        OutputSpec(key: "blockId", label: "Block ID", type: .string),
+        OutputSpec(key: "title", label: "Block title", type: .string),
+        OutputSpec(key: "spaceName", label: "Linked Space", type: .string),
+        OutputSpec(key: "start", label: "Starts (seconds)", type: .number),
+    ]
 
     public static let all: [TriggerType] = [
         TriggerType(
@@ -170,6 +180,51 @@ public enum TriggerCatalog {
                 OutputSpec(key: "message", label: "Description", type: .string),
             ],
             reliability: "Set warnings in Mac Health. Each fires once when crossed, and again only after things recover. Needs ATLAS running."
+        ),
+        TriggerType(
+            id: blockStarting, title: "Block Starting", summary: "When a Time Architect block starts, or a set number of minutes before.",
+            symbolName: "calendar.badge.clock",
+            parameters: [
+                ParameterSpec(key: "block", label: "Block", kind: .text, isRequired: false, help: "A block's title or ID. Leave empty for any block"),
+                ParameterSpec(key: "minutesBefore", label: "Minutes before", kind: .number, isRequired: false,
+                              help: "0 fires at the start", defaultValue: 0, minimum: 0, maximum: 240),
+                ParameterSpec(key: "kind", label: "Only this kind", kind: .text, isRequired: false, defaultValue: "any",
+                              options: ["any", "focus", "task", "appointment", "break"]),
+            ],
+            outputs: blockOutputs,
+            reliability: "If the Mac is asleep or ATLAS isn't running at the start, the block's own setting decides: start on wake if it hasn't ended, or mark it missed. It never fires after a block has ended."
+        ),
+        TriggerType(
+            id: blockEnded, title: "Block Ended", summary: "When a Time Architect block ends.", symbolName: "calendar.badge.checkmark",
+            parameters: [ParameterSpec(key: "block", label: "Block", kind: .text, isRequired: false, help: "A block's title or ID. Leave empty for any block")],
+            outputs: blockOutputs,
+            reliability: "Fires only for blocks that started. Missed and skipped blocks don't end."
+        ),
+        TriggerType(
+            id: focusEnded, title: "Focus Session Ended", summary: "When a focus session finishes or is stopped.", symbolName: "scope",
+            parameters: [ParameterSpec(key: "completedOnly", label: "Only when it ran to the end", kind: .boolean, isRequired: false, defaultValue: false)],
+            outputs: [
+                OutputSpec(key: "title", label: "Session", type: .string),
+                OutputSpec(key: "elapsedMinutes", label: "Minutes focused", type: .number),
+                OutputSpec(key: "completed", label: "Ran to the end", type: .bool),
+            ],
+            reliability: "Sessions live in ATLAS. A session still running when ATLAS quits continues when it reopens."
+        ),
+        TriggerType(
+            id: calendarEventApproaching, title: "Calendar Event Approaching", summary: "A set number of minutes before an event in your calendars.",
+            symbolName: "calendar",
+            parameters: [
+                ParameterSpec(key: "minutesBefore", label: "Minutes before", kind: .number, defaultValue: 10, minimum: 1, maximum: 240),
+                ParameterSpec(key: "calendar", label: "Calendar", kind: .text, isRequired: false, help: "A calendar's name. Leave empty for any"),
+                ParameterSpec(key: "titleContains", label: "Title contains", kind: .text, isRequired: false, help: "e.g. Interview"),
+            ],
+            outputs: [
+                OutputSpec(key: "title", label: "Event title", type: .string),
+                OutputSpec(key: "calendar", label: "Calendar", type: .string),
+                OutputSpec(key: "eventId", label: "Event ID", type: .string),
+            ],
+            permissions: [.calendar],
+            reliability: "Needs calendar integration on (Time Architect → Calendar) and ATLAS running. Only calendars you chose to show are watched; all-day events are ignored."
         ),
     ]
 }

@@ -15,12 +15,14 @@ import UserNotifications
 @MainActor
 final class AppModel: ObservableObject {
     enum Section: String, Hashable, CaseIterable, Identifiable {
-        case spaces, windows, orbit, health, automations, history, actions, companion, permissions
+        case today, spaces, timeline, windows, orbit, health, automations, history, actions, companion, permissions
         var id: Self { self }
 
         var title: String {
             switch self {
+            case .today: return "Today"
             case .spaces: return "Spaces"
+            case .timeline: return "Time Architect"
             case .windows: return "Windows"
             case .orbit: return "Orbit"
             case .health: return "Mac Health"
@@ -34,7 +36,9 @@ final class AppModel: ObservableObject {
 
         var symbol: String {
             switch self {
+            case .today: return "sun.max"
             case .spaces: return "cube.transparent"
+            case .timeline: return "calendar.day.timeline.left"
             case .windows: return "macwindow.on.rectangle"
             case .orbit: return "globe.americas"
             case .health: return "heart.text.square"
@@ -75,6 +79,12 @@ final class AppModel: ObservableObject {
     let companion: CompanionController?
     /// A run to select when Run History appears (the Companion's "Details").
     @Published var focusedRunID: UUID?
+    /// Stage 07 Time Architect and Today. Nil if scheduling couldn't start.
+    let timeArchitect: TimeArchitectModel?
+    /// The running focus session, for the menu bar countdown.
+    @Published private(set) var focusSession: FocusSession?
+    @Published var showGenerator = false
+    @Published var generatorPrompt = ""
     /// Opens the main window; set by the first view that has `openWindow`.
     var openMainWindow: (() -> Void)?
     /// One editor per open automation, so drafts and undo survive switching.
@@ -99,6 +109,7 @@ final class AppModel: ObservableObject {
             windowManager = WindowManagerModel(core: nil)
             orbit = nil
             companion = nil
+            timeArchitect = nil
             startupError = error.localizedDescription
             return
         }
@@ -113,6 +124,8 @@ final class AppModel: ObservableObject {
             orbitError = ActionError.failed("Orbit couldn't start, so file features are unavailable.")
         }
         companion = core.map(CompanionController.init)
+        timeArchitect = core.flatMap { core in core.time.map { TimeArchitectModel(core: core, time: $0) } }
+        focusSession = core?.time?.focus.session
         spaces.onError = { [weak self] message in self?.errorMessage = message }
         reloadWorkflows()
         reloadRuns()
@@ -194,6 +207,7 @@ final class AppModel: ObservableObject {
             self?.draftWorkflow(named: name, launching: bundleIDs)
         }
         host.isPaused = { [weak self] in self?.isPaused ?? false }
+        host.describeAutomation = { [weak self] prompt in self?.describeAutomation(prompt) }
         companion.host = host
         companion.start()
     }
@@ -222,6 +236,21 @@ final class AppModel: ObservableObject {
             section = .automations
             bringForward()
         }
+    }
+
+    // MARK: - Time Architect
+
+    func explain(_ workflow: Workflow) -> String {
+        guard let core else { return "" }
+        return WorkflowExplainer.explain(workflow, registry: core.registry)
+    }
+
+    /// Opens "Describe an Automation", optionally with text already typed.
+    func describeAutomation(_ prompt: String = "") {
+        generatorPrompt = prompt
+        section = .automations
+        showGenerator = true
+        bringForward()
     }
 
     // MARK: - Undo
@@ -500,6 +529,8 @@ final class AppModel: ObservableObject {
             reloadRuns()
         case AtlasEvent.Name.stepStarted, AtlasEvent.Name.stepFinished:
             reloadRuns()
+        case _ where event.name.hasPrefix("focus."):
+            focusSession = core?.time?.focus.session
         case AtlasEvent.Name.automationPaused:
             isPaused = true
         case AtlasEvent.Name.automationResumed:

@@ -1,5 +1,6 @@
 #if os(macOS)
 import ApplicationServices
+import EventKit
 import Foundation
 import UserNotifications
 
@@ -31,6 +32,13 @@ public struct MacPermissionProvider: PermissionProvider {
             // ATLAS isn't sandboxed in Stage 01; macOS prompts the first
             // time it reaches into Desktop, Documents, Downloads, etc.
             return .managedBySystem
+
+        case .calendar:
+            switch EKEventStore.authorizationStatus(for: .event) {
+            case .fullAccess: return .granted
+            case .notDetermined: return .notDetermined
+            default: return .denied
+            }
         }
     }
 
@@ -49,6 +57,10 @@ public struct MacPermissionProvider: PermissionProvider {
 
         case .automation, .fileAccess:
             return .managedBySystem
+
+        case .calendar:
+            let granted = (try? await EKEventStore().requestFullAccessToEvents()) ?? false
+            return granted ? .granted : .denied
         }
     }
 }

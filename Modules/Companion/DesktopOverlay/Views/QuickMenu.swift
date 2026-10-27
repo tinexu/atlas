@@ -108,6 +108,39 @@ struct QuickMenu {
         })
         menu.addItem(submenu("Restore Layout", symbol: "macwindow.on.rectangle", windows))
 
+        // Focus and today (Stage 07).
+        if let time = controller.core.time {
+            let focus = NSMenu()
+            if let session = time.focus.session {
+                focus.addItem(disabled("\(session.title): \(Int(session.remaining(at: Date()) / 60)) min left"))
+                if session.state == .running {
+                    focus.addItem(ClosureMenuItem("Pause") { time.focus.pause() })
+                } else {
+                    focus.addItem(ClosureMenuItem("Resume") { time.focus.resume() })
+                }
+                focus.addItem(ClosureMenuItem("Add 10 Minutes") { time.focus.extend(minutes: 10) })
+                focus.addItem(ClosureMenuItem("Stop") { time.focus.stop() })
+            } else {
+                for minutes in [25, 50, 90] {
+                    focus.addItem(ClosureMenuItem("\(minutes) Minutes") {
+                        run(CommandPlan(kind: .actions([.init(StartFocusAction.id, ["minutes": .number(Double(minutes))])]),
+                                        summary: "Start a \(minutes) min focus session", hasSideEffects: true))
+                    })
+                }
+            }
+            menu.addItem(submenu("Focus", symbol: "scope", focus))
+            let overview = DailyOverview.make(store: store, schedule: time.schedule, events: controller.core.events)
+            let today = NSMenu()
+            today.addItem(disabled(overview.upcoming.first.map { "Next: \($0.block.title) at \($0.start.formatted(date: .omitted, time: .shortened))" } ?? "Nothing else planned today"))
+            today.addItem(disabled("Focus: \(Int(overview.completedFocus / 60)) of \(Int(overview.plannedFocus / 60)) min"))
+            if !overview.failures.isEmpty { today.addItem(disabled("\(overview.failures.count) automation\(overview.failures.count == 1 ? "" : "s") need attention")) }
+            if overview.reviewCount > 0 { today.addItem(disabled("\(overview.reviewCount) file\(overview.reviewCount == 1 ? "" : "s") to review")) }
+            today.addItem(.separator())
+            today.addItem(ClosureMenuItem("Open Today") { [controller] in controller.host.openSection("today") })
+            today.addItem(ClosureMenuItem("Open Time Architect") { [controller] in controller.host.openSection("timeline") })
+            menu.addItem(submenu("Today", symbol: "sun.max", today))
+        }
+
         menu.addItem(ClosureMenuItem("Search Files…", symbol: "magnifyingglass") { [controller] in
             controller.palette.show(near: controller.overlay.characterFrame, text: "find ")
         })

@@ -27,6 +27,10 @@ public struct CommandPlan: Equatable, Sendable, Identifiable {
         case section(String)
         case companionSettings
         case health
+        /// "When I open Blender, …": draft it as an automation.
+        case describeAutomation(String)
+        case today
+        case timeline
     }
 
     public enum Kind: Equatable, Sendable {
@@ -105,11 +109,14 @@ public struct CommandVocabulary: Sendable {
         public let id: UUID
         public let name: String
         public let profiles: [(id: UUID, name: String, isDefault: Bool)]
+        /// e.g. "coding-lab", for matching "my app" to the coding Space.
+        public let templateID: String
 
-        public init(id: UUID, name: String, profiles: [(id: UUID, name: String, isDefault: Bool)]) {
+        public init(id: UUID, name: String, profiles: [(id: UUID, name: String, isDefault: Bool)], templateID: String = "") {
             self.id = id
             self.name = name
             self.profiles = profiles
+            self.templateID = templateID
         }
 
         public static func == (a: SpaceEntry, b: SpaceEntry) -> Bool { a.id == b.id && a.name == b.name }

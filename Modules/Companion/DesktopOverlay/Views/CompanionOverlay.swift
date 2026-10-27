@@ -168,6 +168,21 @@ struct CompanionOverlayView: View {
                     )
                     .contextMenu { QuickMenuSwiftUI(controller: controller) }
             }
+            .overlay(alignment: .bottom) {
+                if let session = controller.focusSession {
+                    Group {
+                        if session.state == .running {
+                            Text(timerInterval: Date()...session.endsAt(from: Date()), countsDown: true)
+                        } else {
+                            Text("Paused")
+                        }
+                    }
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.regularMaterial, in: Capsule())
+                    .allowsHitTesting(false)
+                }
+            }
             .help("\(controller.state.title). Click for quick controls; drag to move.")
             .accessibilityElement()
             .accessibilityLabel("ATLAS Companion, \(controller.state.title)")
@@ -189,13 +204,14 @@ struct QuickMenuSwiftUI: View {
 /// The speech bubble: latest result or a suggestion. Click for details.
 struct BubbleView: View {
     @ObservedObject var controller: CompanionController
+    @State private var showWhy = false
 
     var body: some View {
         if let bubble = controller.bubble {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: bubble.isFailure ? "exclamationmark.triangle.fill" : bubble.suggestion != nil ? "lightbulb.fill" : "checkmark.circle.fill")
-                        .foregroundStyle(bubble.isFailure ? .orange : bubble.suggestion != nil ? .yellow : .green)
+                    Image(systemName: bubble.isFailure ? "exclamationmark.triangle.fill" : bubble.suggestion != nil || bubble.recommendation != nil ? "lightbulb.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(bubble.isFailure ? .orange : bubble.suggestion != nil || bubble.recommendation != nil ? .yellow : .green)
                     Text(bubble.text).font(.callout.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     Button { controller.dismissBubble() } label: { Image(systemName: "xmark").font(.caption2) }
@@ -205,8 +221,23 @@ struct BubbleView: View {
                 if let detail = bubble.detail, !detail.isEmpty {
                     Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
+                if let recommendation = bubble.recommendation {
+                    if showWhy {
+                        Text(recommendation.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 8) {
+                        Button(recommendation.action.title) { controller.accept(recommendation) }
+                            .controlSize(.small).buttonStyle(.borderedProminent)
+                        Button("Not Now") { controller.dismiss(recommendation, forever: false) }.controlSize(.small)
+                        Menu("More") {
+                            Button("Why am I seeing this?") { showWhy.toggle() }
+                            Button("Don't suggest this") { controller.dismiss(recommendation, forever: true) }
+                        }
+                        .menuStyle(.borderlessButton).controlSize(.small).fixedSize()
+                    }
+                }
                 HStack(spacing: 8) {
-                    if let fixTitle = bubble.fixTitle, let fix = bubble.fix {
+                    if bubble.recommendation == nil, let fixTitle = bubble.fixTitle, let fix = bubble.fix {
                         Button(fixTitle) {
                             if let suggestion = bubble.suggestion { controller.accept(suggestion) } else { controller.perform(fix); controller.dismissBubble() }
                         }
@@ -227,7 +258,8 @@ struct BubbleView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator))
             .contentShape(RoundedRectangle(cornerRadius: 12))
-            .onTapGesture { controller.openBubble() }
+            .onTapGesture { if bubble.recommendation == nil { controller.openBubble() } }
+            .onChange(of: bubble.id) { _, _ in showWhy = false }
             .padding(4)
         }
     }

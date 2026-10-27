@@ -25,6 +25,28 @@ struct MenuBarContent: View {
             Divider()
         }
 
+        if let focus = model.core?.time?.focus {
+            Section("Focus") {
+                if let session = model.focusSession {
+                    Text("\(session.title): \(Int(session.remaining(at: Date()) / 60)) min left")
+                    if session.state == .running {
+                        Button("Pause Focus") { focus.pause() }
+                    } else {
+                        Button("Resume Focus") { focus.resume() }
+                    }
+                    Button("Add 10 Minutes") { focus.extend(minutes: 10) }
+                    Button("Stop Focus") { focus.stop() }
+                } else {
+                    Menu("Start Focus") {
+                        ForEach([25, 50, 90], id: \.self) { minutes in
+                            Button("\(minutes) minutes") { focus.start(minutes: Double(minutes)) }
+                        }
+                    }
+                }
+            }
+            Divider()
+        }
+
         if model.workflows.isEmpty {
             Text("No automations yet")
         } else {

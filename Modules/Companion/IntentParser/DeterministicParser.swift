@@ -53,6 +53,9 @@ public struct DeterministicParser: Sendable {
         let (verb, rest) = Self.splitVerb(text)
 
         if let plan = storagePlan(text) { return .plan(plan) }
+        if let outcome = workSessionPlan(text) { return outcome }
+        if let plan = automationIdea(raw: raw, text: text) { return .plan(plan) }
+        if let plan = focusControl(text) { return .plan(plan) }
         if verb == .pause || text == "pause automations" { return .plan(pausePlan(true)) }
         if verb == .resume { return .plan(pausePlan(false)) }
         if NameMatcher.words(text).contains("timer") { return timerPlan(verb: verb, rest: rest, text: text) }
@@ -146,6 +149,8 @@ public struct DeterministicParser: Sendable {
         let target = NameMatcher.keywords(rest).joined(separator: " ")
         let screens: [(words: [String], destination: CommandPlan.Destination, title: String)] = [
             (["companion settings", "companion"], .companionSettings, "Companion settings"),
+            (["today", "my day", "daily overview"], .today, "Today"),
+            (["time architect", "timeline", "calendar", "schedule"], .timeline, "Time Architect"),
             (["permissions", "privacy"], .section("permissions"), "Permissions"),
             (["run history", "history", "runs", "log"], .runHistory(nil), "Run History"),
             (["automations", "workflows", "flow"], .section("automations"), "Automations"),
@@ -160,6 +165,89 @@ public struct DeterministicParser: Sendable {
             return CommandPlan(kind: .open(screen.destination), summary: "Open \(screen.title)", hasSideEffects: false, subject: screen.title)
         }
         return nil
+    }
+
+    // MARK: - Automations and focus
+
+    /// "When I open Blender, activate Creative Studio" describes an automation.
+    func automationIdea(raw: String, text: String) -> CommandPlan? {
+        let starts = ["when i ", "whenever i ", "when a ", "when my ", "every weekday", "every day", "every morning", "each time i ", "every time i "]
+        guard starts.contains(where: text.hasPrefix), text.split(separator: " ").count >= 4 else { return nil }
+        return CommandPlan(kind: .open(.describeAutomation(raw.trimmingCharacters(in: .whitespacesAndNewlines))),
+                           summary: "Draft an automation: “\(raw.trimmingCharacters(in: .whitespacesAndNewlines))”",
+                           details: ["Opens a draft in Automations to review. Nothing is saved or turned on until you say so."],
+                           hasSideEffects: false, subject: "Automation")
+    }
+
+    /// "pause focus", "stop focus", "end my focus session".
+    func focusControl(_ text: String) -> CommandPlan? {
+        let words = Set(NameMatcher.words(text))
+        guard words.contains("focus") else { return nil }
+        if !words.isDisjoint(with: ["stop", "end", "cancel", "finish"]) {
+            return CommandPlan(kind: .actions([.init(StopFocusAction.id)]), summary: "Stop the focus session", hasSideEffects: true, subject: "Focus")
+        }
+        if words.contains("plan") || words.contains("timeline") || words.contains("schedule") {
+            return CommandPlan(kind: .open(.timeline), summary: "Open Time Architect", hasSideEffects: false, subject: "Time Architect")
+        }
+        return nil
+    }
+
+    // MARK: - Work sessions
+
+    /// What a Space is for, by template, to match "my app" or "my essay".
+    static let spaceHints: [String: Set<String>] = [
+        "coding-lab": ["code", "coding", "app", "apps", "program", "programming", "develop", "developing", "project", "software", "bug",
+                       "bugs", "website", "api", "repo"],
+        "study-library": ["study", "studying", "homework", "exam", "exams", "class", "course", "reading", "revise", "revision", "essay",
+                          "thesis", "notes", "lecture"],
+        "creative-studio": ["design", "art", "draw", "drawing", "blender", "video", "music", "creative", "edit", "editing", "photo",
+                            "photos", "illustration", "animation"],
+        "meeting-room": ["meeting", "meetings", "call", "calls", "interview"],
+        "personal-lounge": ["relax", "personal", "games", "gaming"],
+    ]
+
+    /// "I'm going to work on my app for the next two hours", "focus on my
+    /// essay for 90 minutes", "study for an hour": the right Space plus a
+    /// focus block of that length on the timeline.
+    func workSessionPlan(_ text: String) -> ParseOutcome? {
+        let normalized = Self.wordsToNumbers(text)
+        let pattern = #"^(?:i'm |i am |im )?(?:going to |gonna |about to |want to |will )?(work|study|focus|design|write|code|practice|read)(?:ing)?(?: on)? ?(.*?) for (?:the next |about |around )?(.+)$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: normalized, range: NSRange(normalized.startIndex..., in: normalized)),
+              let verbRange = Range(match.range(at: 1), in: normalized), let topicRange = Range(match.range(at: 2), in: normalized),
+              let durationRange = Range(match.range(at: 3), in: normalized),
+              let seconds = Self.duration(in: String(normalized[durationRange])), seconds >= 5 * 60
+        else { return nil }
+        let verb = String(normalized[verbRange])
+        let topic = String(normalized[topicRange]).trimmingCharacters(in: .whitespaces)
+        let words = Set(NameMatcher.keywords(topic + " " + verb))
+        // A Space named in the topic, else one whose purpose fits.
+        let named = NameMatcher.rank(topic, in: vocabulary.spaces, name: \.name, ignoring: Self.spaceWords).first.flatMap { $0.score >= 0.75 ? $0.item : nil }
+        let space = named ?? vocabulary.spaces.first { space in
+            !(Self.spaceHints[space.templateID] ?? []).isDisjoint(with: words)
+        }
+        let minutes = seconds / 60
+        let title = topic.isEmpty ? verb.capitalized : topic.replacingOccurrences(of: "^(my|the|a) ", with: "", options: .regularExpression).capitalized
+        var focus: ActionParameters = ["minutes": .number(minutes), "title": .string(space?.defaultProfile?.name ?? title)]
+        if let space { focus["space"] = .string(space.name) }
+        var steps: [CommandPlan.Step] = []
+        if let space { steps.append(.init(SpaceActivateAction.id, ["space": .string(space.name)])) }
+        steps.append(.init(StartFocusAction.id, focus))
+        let length = StartTimerAction.duration(seconds)
+        let summary = space.map { "Activate \($0.name)\($0.defaultProfile.map { " — \($0.name)" } ?? "") and start a \(length) focus block" }
+            ?? "Start a \(length) focus block for “\(title)”"
+        return .plan(CommandPlan(kind: .actions(steps), summary: summary,
+                                 details: ["The block appears on your Time Architect timeline and counts down in the menu bar."]
+                                    + (space == nil ? ["No Space matched “\(topic)”, so only the timer starts."] : []),
+                                 hasSideEffects: true, subject: space?.name ?? title))
+    }
+
+    /// "two hours" → "2 hours".
+    static func wordsToNumbers(_ text: String) -> String {
+        let numbers = ["one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+                       "nine": "9", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "forty": "40", "forty-five": "45",
+                       "fifty": "50", "sixty": "60", "ninety": "90"]
+        return text.split(separator: " ").map { numbers[String($0)] ?? String($0) }.joined(separator: " ")
     }
 
     // MARK: - Timers

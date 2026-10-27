@@ -257,12 +257,12 @@ private final class MockModelProvider: IntentModelProvider, @unchecked Sendable 
     var answer: String
     var error: Error?
     var unavailable: String?
-    private(set) var requests: [AIRequest] = []
+    private(set) var requests: [ModelRequest] = []
 
     init(answer: String) { self.answer = answer }
     var displayName: String { "Mock model" }
     func unavailableReason() async -> String? { unavailable }
-    func complete(_ request: AIRequest) async throws -> String {
+    func complete(_ request: ModelRequest) async throws -> String {
         requests.append(request)
         if let error { throw error }
         return answer
@@ -728,7 +728,7 @@ final class CompanionStoreTests: XCTestCase {
         }
 
         let store = try AtlasStore(database: SQLiteDatabase(path: url.path))
-        XCTAssertEqual(store.database.userVersion, 6)
+        XCTAssertEqual(store.database.userVersion, Schema.currentVersion)
         XCTAssertEqual(try store.workflow(id: workflowID)?.name, "Old", "Existing data survives")
         XCTAssertEqual(try store.healthSamples(from: .distantPast).count, 1)
         XCTAssertEqual(try store.companionSettings(), CompanionSettings())

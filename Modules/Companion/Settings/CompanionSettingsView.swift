@@ -230,7 +230,7 @@ public struct CompanionSettingsView: View {
         let request = AIRequest.make(text: "set up for my interview", registry: controller.core.registry, vocabulary: vocabulary,
                                      context: controller.context())
         let provider = CloudModelProvider(model: settings.cloudModel)
-        var body = provider.body(for: request)
+        var body = provider.body(for: request.modelRequest)
         body["system"] = request.instructions
         let json = (try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]))
             .flatMap { String(data: $0, encoding: .utf8) } ?? request.preview

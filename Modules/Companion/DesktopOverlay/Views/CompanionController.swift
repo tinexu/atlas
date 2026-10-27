@@ -21,6 +21,8 @@ public struct CompanionHost {
     /// Opens a new, unsaved-looking draft in the editor (saved disabled).
     public var draftWorkflow: (String, [String]) -> Void = { _, _ in }
     public var isPaused: () -> Bool = { false }
+    /// Opens "Describe an Automation" with the text typed.
+    public var describeAutomation: (String) -> Void = { _ in }
 
     public init() {}
 }
@@ -35,6 +37,7 @@ public struct StatusBubble: Identifiable, Equatable {
     public var fixTitle: String?
     public var fix: Suggestion.Action?
     public var suggestion: Suggestion?
+    public var recommendation: Recommendation?
 }
 
 /// Glues the Companion together on the main actor: settings, the state
@@ -51,6 +54,8 @@ public final class CompanionController: ObservableObject {
     @Published public private(set) var aiStatus: String?
     @Published public private(set) var hotKeyProblems: [String] = []
     @Published public var paletteVisible = false
+    /// The running focus session, for the countdown under the character.
+    @Published public private(set) var focusSession: FocusSession?
 
     public let core: AtlasCore
     public let runner: CommandRunner
@@ -93,6 +98,11 @@ public final class CompanionController: ObservableObject {
         suggestions.onSuggestion = { [weak self] suggestion in
             Task { @MainActor in self?.show(suggestion) }
         }
+        core.time?.recommendations.onRecommendation = { [weak self] recommendation in
+            Task { @MainActor in self?.show(recommendation) }
+        }
+        applySources()
+        focusSession = core.time?.focus.session
         Task.detached(priority: .utility) { [weak self] in
             let apps = InstalledApps.scan()
             await self?.received(apps)
@@ -123,6 +133,7 @@ public final class CompanionController: ObservableObject {
             AtlasLog.engine.error("Couldn't save Companion settings: \(error.localizedDescription, privacy: .public)")
         }
         suggestions.update(settings: next)
+        applySources()
         overlay.apply(next)
         if hotKeysChanged { registerHotKeys() }
         if aiChanged { Task { await refreshAIStatus() } }
@@ -195,6 +206,14 @@ public final class CompanionController: ObservableObject {
             showResult(of: event)
         case AtlasEvent.Name.actionEffect where event.payload["kind"]?.stringValue == "app":
             if let bundleID = event.payload["value"]?.stringValue { atlasLaunches[bundleID] = Date() }
+        case _ where event.name.hasPrefix("focus."):
+            focusSession = core.time?.focus.session
+            updateFocus()
+            if event.name == AtlasEvent.Name.focusEnded {
+                let minutes = Int(event.payload["elapsedMinutes"]?.numberValue ?? 0)
+                showBubble(StatusBubble(text: "\(event.payload["title"]?.stringValue ?? "Focus") \(event.payload["completed"]?.boolValue == true ? "done" : "stopped") · \(minutes) min",
+                                        isFailure: false), seconds: 8)
+            }
         case AtlasEvent.Name.timerStarted, AtlasEvent.Name.timerCompleted, AtlasEvent.Name.timerStopped, AtlasEvent.Name.spaceActivatedEvent:
             updateFocus()
             if event.name == AtlasEvent.Name.timerCompleted, let name = event.payload["name"]?.stringValue {
@@ -260,6 +279,49 @@ public final class CompanionController: ObservableObject {
         showBubble(StatusBubble(text: suggestion.title, detail: suggestion.detail, isFailure: suggestion.kind == .workflowFailed,
                                 fixTitle: suggestion.actionTitle, fix: suggestion.action, suggestion: suggestion), seconds: 25)
     }
+
+    // MARK: - Recommendations (Stage 07)
+
+    /// Which signals recommendations may use, from the context switches.
+    private func applySources() {
+        var sources = RecommendationSources()
+        sources.activeSpace = settings.context.activeSpace
+        sources.runs = settings.context.runs
+        sources.schedule = settings.context.timers
+        sources.health = settings.context.health
+        sources.reviews = settings.context.reviews
+        core.time?.recommendations.sources = sources
+    }
+
+    private func show(_ recommendation: Recommendation) {
+        showBubble(StatusBubble(text: recommendation.title, detail: recommendation.detail, isFailure: recommendation.kind == .repeatedFailure,
+                                fixTitle: recommendation.action.title, recommendation: recommendation), seconds: 45)
+    }
+
+    func accept(_ recommendation: Recommendation) {
+        dismissBubble()
+        guard let engine = core.time?.recommendations else { return }
+        Task {
+            switch await engine.accept(recommendation) {
+            case .ran:
+                break   // The run's own bubble follows.
+            case .done(let message):
+                showBubble(StatusBubble(text: message, isFailure: false), seconds: 8)
+            case .failed(let message):
+                showBubble(StatusBubble(text: message, isFailure: true), seconds: 10)
+            case .needsUI(let action):
+                if case .disableOrFix(let workflowID, let nodeID) = action { host.openWorkflowAt(workflowID, nodeID) }
+            }
+        }
+    }
+
+    func dismiss(_ recommendation: Recommendation, forever: Bool) {
+        core.time?.recommendations.dismiss(recommendation, forever: forever)
+        dismissBubble()
+    }
+
+    /// The same provider the palette uses, for "Describe an Automation".
+    public func generationProvider() -> (any IntentModelProvider)? { provider() }
 
     func accept(_ suggestion: Suggestion) {
         suggestions.accepted(suggestion)
@@ -383,6 +445,9 @@ public final class CompanionController: ObservableObject {
         case .section(let name): host.openSection(name)
         case .companionSettings: host.openSection("companion")
         case .health: host.openSection("health")
+        case .describeAutomation(let text): host.describeAutomation(text)
+        case .today: host.openSection("today")
+        case .timeline: host.openSection("timeline")
         }
     }
 
@@ -498,7 +563,8 @@ public final class CompanionController: ObservableObject {
         let focusWords = ["focus", "study", "deep work", "pomodoro"]
         let timerFocus = TimerCenter.shared.active.contains { timer in focusWords.contains { timer.name.lowercased().contains($0) } }
         let spaceFocus = (try? core.store.activeSpaceID()).flatMap { $0 }.map(settings.focusSpaceIDs.contains) ?? false
-        feed(.focus(timerFocus || spaceFocus))
+        let session = core.time?.focus.session?.state == .running
+        feed(.focus(timerFocus || spaceFocus || session))
         updateRendering()
     }
 }

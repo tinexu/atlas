@@ -1,5 +1,6 @@
 import AtlasCompanionUI
 import AtlasCore
+import AtlasFlow
 import AtlasOrbitUI
 import AtlasSpacesUI
 import SwiftUI
@@ -24,6 +25,16 @@ struct RootView: View {
                 .safeAreaInset(edge: .bottom) { pauseToggle }
             } detail: {
                 switch model.section {
+                case .today:
+                    if let time = model.timeArchitect {
+                        TodayView(model: time,
+                                  openRun: { model.focusedRunID = $0; model.section = .history },
+                                  openReviews: { model.orbit?.tab = .rules; model.section = .orbit },
+                                  openTimeline: { model.section = .timeline },
+                                  openWorkflow: { model.selectedWorkflowID = $0; model.section = .automations })
+                    } else { unavailable("Today") }
+                case .timeline:
+                    if let time = model.timeArchitect { TimeArchitectView(model: time) } else { unavailable("Time Architect") }
                 case .spaces: SpacesView()
                 case .windows:
                     WindowManagerView(

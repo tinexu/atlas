@@ -1,9 +1,6 @@
 import AtlasCore
 import AtlasSpaces
 import Foundation
-#if canImport(FoundationModels)
-import FoundationModels
-#endif
 
 /// The optional AI layer (off by default). A model only ever *chooses* from
 /// what ATLAS already has: registered actions, your Spaces, workflows and
@@ -44,6 +41,11 @@ public struct AIRequest: Equatable, Sendable {
     public let input: String
 
     public var preview: String { "INSTRUCTIONS\n\(instructions)\n\nREQUEST\n\(input)" }
+
+    /// What a model provider is sent.
+    public var modelRequest: ModelRequest {
+        ModelRequest(instructions: instructions, input: input, schema: Self.schema)
+    }
 
     /// Actions a model may propose. Internal plumbing (rule organizer, undo,
     /// logging) is never offered.
@@ -278,126 +280,6 @@ public struct PlanValidator: Sendable {
     }
 }
 
-// MARK: - Providers
-
-/// A language model that can answer an `AIRequest` with JSON text.
-public protocol IntentModelProvider: Sendable {
-    var displayName: String { get }
-    /// Nil when it can be used; otherwise why not, in words.
-    func unavailableReason() async -> String?
-    func complete(_ request: AIRequest) async throws -> String
-}
-
-/// Apple's on-device model (Apple Intelligence). Nothing leaves the Mac.
-public struct OnDeviceModelProvider: IntentModelProvider {
-    public init() {}
-    public var displayName: String { "Apple Intelligence (on-device)" }
-
-    public func unavailableReason() async -> String? {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            return SystemLanguageModel.default.isAvailable
-                ? nil : "Apple Intelligence isn't available on this Mac (it may be off in System Settings or still downloading)."
-        }
-        #endif
-        return "On-device AI needs macOS 26 or later with Apple Intelligence."
-    }
-
-    public func complete(_ request: AIRequest) async throws -> String {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            let schemaText = (try? JSONSerialization.data(withJSONObject: AIRequest.schema, options: [.sortedKeys]))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-            let session = LanguageModelSession(instructions: request.instructions + "\n\nJSON schema:\n" + schemaText)
-            return try await session.respond(to: request.input + "\n\nAnswer with the JSON object only.").content
-        }
-        #endif
-        throw PlanRejection("On-device AI isn't available.")
-    }
-}
-
-/// Claude through the Messages API, with the person's own API key (kept in
-/// the Keychain). Only used when they choose it.
-public struct CloudModelProvider: IntentModelProvider {
-    public let model: String
-    let apiKey: @Sendable () -> String?
-    let session: URLSession
-
-    public init(model: String, apiKey: @escaping @Sendable () -> String? = { CompanionKeychain.apiKey() }, session: URLSession = .shared) {
-        self.model = model
-        self.apiKey = apiKey
-        self.session = session
-    }
-
-    public var displayName: String { "Claude (\(model))" }
-
-    public func unavailableReason() async -> String? {
-        (apiKey()?.isEmpty ?? true) ? "Add your Claude API key in Companion settings." : nil
-    }
-
-    /// The JSON body sent to the API, also used for "Preview request".
-    public func body(for request: AIRequest) -> [String: Any] {
-        [
-            "model": model,
-            "max_tokens": 2_000,
-            "system": request.instructions,
-            "messages": [["role": "user", "content": request.input]],
-            "output_config": ["effort": "low", "format": ["type": "json_schema", "schema": AIRequest.schema]],
-            "fallbacks": "default",
-        ]
-    }
-
-    public func complete(_ request: AIRequest) async throws -> String {
-        guard let key = apiKey(), !key.isEmpty else { throw PlanRejection("No Claude API key is saved.") }
-        var urlRequest = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
-        urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = 30
-        urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.setValue(key, forHTTPHeaderField: "x-api-key")
-        urlRequest.setValue("2026-10-21", forHTTPHeaderField: "anthropic-version")
-        urlRequest.setValue("server-side-fallback-2026-07-01", forHTTPHeaderField: "anthropic-beta")
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body(for: request))
-        let (data, response) = try await session.data(for: urlRequest)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        guard status == 200, let json else {
-            let message = ((json?["error"] as? [String: Any])?["message"] as? String) ?? "HTTP \(status)"
-            throw PlanRejection(status == 401 ? "The Claude API key was rejected." : "Claude couldn't answer: \(message)")
-        }
-        if json["stop_reason"] as? String == "refusal" { throw PlanRejection("Claude declined that request.") }
-        let content = json["content"] as? [[String: Any]] ?? []
-        let text = content.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
-        guard !text.isEmpty else { throw PlanRejection("Claude returned no plan.") }
-        return text
-    }
-}
-
-/// The Claude API key, in the login Keychain.
-public enum CompanionKeychain {
-    static let service = "com.atlas.companion.claude"
-    static let account = "api-key"
-
-    public static func apiKey() -> String? {
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                    kSecAttrAccount as String: account, kSecReturnData as String: true,
-                                    kSecMatchLimit as String: kSecMatchLimitOne]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    @discardableResult
-    public static func setAPIKey(_ key: String?) -> Bool {
-        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                   kSecAttrAccount as String: account]
-        SecItemDelete(base as CFDictionary)
-        guard let key, !key.isEmpty else { return true }
-        var add = base
-        add[kSecValueData as String] = Data(key.utf8)
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
-    }
-}
-
 /// Runs the AI layer with the built-in parser as the fallback.
 public struct IntentResolver: Sendable {
     public struct Result: Equatable, Sendable {
@@ -427,7 +309,7 @@ public struct IntentResolver: Sendable {
         }
         let request = AIRequest.make(text: text, registry: validator.registry, vocabulary: validator.vocabulary, context: context)
         do {
-            let answer = try await provider.complete(request)
+            let answer = try await provider.complete(request.modelRequest)
             let plan = try validator.validate(try AIPlanResponse.decode(answer))
             return Result(outcome: .plan(plan), note: "Planned by \(provider.displayName). Check it before running.", usedAI: true)
         } catch {

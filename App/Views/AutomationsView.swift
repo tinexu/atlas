@@ -1,3 +1,4 @@
+import AtlasCompanion
 import AtlasCore
 import AtlasFlow
 import SwiftUI
@@ -26,6 +27,15 @@ struct AutomationsView: View {
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         }
         .navigationTitle("Automations")
+        .sheet(isPresented: $model.showGenerator) {
+            if let core = model.core {
+                GenerateWorkflowSheet(core: core, apps: model.companion?.apps.map { ($0.id, $0.name) } ?? [],
+                                      provider: model.companion?.generationProvider(), prompt: model.generatorPrompt) { saved in
+                    model.reloadWorkflows()
+                    model.selectedWorkflowID = saved.id
+                }
+            }
+        }
     }
 }
 
@@ -35,10 +45,15 @@ private struct AutomationDetail: View {
     @EnvironmentObject private var model: AppModel
     let workflow: Workflow
     @State private var showSteps = false
+    @State private var explanation: String?
 
     var body: some View {
         let editor = model.editor(for: workflow)
         VStack(spacing: 0) {
+            if let core = model.core {
+                DraftBanner(core: core, workflow: workflow) { model.reloadWorkflows() }
+                    .id(workflow.id)
+            }
             if workflow.isLinear {
                 HStack {
                     Picker("Edit as", selection: $showSteps) {
@@ -67,7 +82,21 @@ private struct AutomationDetail: View {
                 model.pendingFocus = nil
             }
         }
+        .toolbar {
+            ToolbarItem {
+                Button { explanation = model.explain(workflow) } label: { Label("Explain", systemImage: "text.bubble") }
+                    .help("Explain this workflow in plain words")
+            }
+        }
+        .sheet(item: Binding(get: { explanation.map(TextItem.init) }, set: { explanation = $0?.text })) { item in
+            ExplanationSheet(title: "What “\(workflow.name)” does", text: item.text)
+        }
     }
+}
+
+struct TextItem: Identifiable {
+    let text: String
+    var id: String { text }
 }
 
 // MARK: - List
@@ -94,6 +123,9 @@ private struct WorkflowList: View {
                 Button { model.createWorkflow() } label: { Label("New Automation", systemImage: "plus") }
                     .buttonStyle(.borderless)
                 Spacer()
+                Button { model.showGenerator = true } label: { Label("Describe…", systemImage: "wand.and.stars") }
+                    .buttonStyle(.borderless)
+                    .help("Describe an automation in a sentence and get a draft")
             }
             .padding(10)
             .background(.bar)

@@ -56,7 +56,7 @@ public enum NameMatcher {
     }
 
     /// 1 for the same word, less for plurals, prefixes and typos.
-    static func wordScore(_ a: String, _ b: String) -> Double {
+    public static func wordScore(_ a: String, _ b: String) -> Double {
         if a == b { return 1 }
         let sa = stem(a), sb = stem(b)
         if sa == sb { return 0.95 }
@@ -70,7 +70,7 @@ public enum NameMatcher {
     }
 
     /// Crude English stemming: enough for plurals and -ing/-ed/-ation forms.
-    static func stem(_ word: String) -> String {
+    public static func stem(_ word: String) -> String {
         for suffix in ["ications", "ication", "ations", "ation", "ings", "ing", "ies", "es", "ed", "s"] {
             if word.count > suffix.count + 2, word.hasSuffix(suffix) {
                 let base = String(word.dropLast(suffix.count))
@@ -80,7 +80,7 @@ public enum NameMatcher {
         return word
     }
 
-    static func levenshtein(_ a: String, _ b: String) -> Int {
+    public static func levenshtein(_ a: String, _ b: String) -> Int {
         let a = Array(a), b = Array(b)
         if a.isEmpty { return b.count }
         if b.isEmpty { return a.count }

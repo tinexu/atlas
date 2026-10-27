@@ -34,6 +34,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>    <string>15.0</string>
     <key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
     <key>NSHighResolutionCapable</key>   <true/>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>ATLAS shows your calendar events on the Time Architect timeline and suggests the right Space before they start. It only changes a calendar if you allow writing to it.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>ATLAS shows your calendar events on the Time Architect timeline.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>ATLAS sends commands to apps you include in your automations, such as telling Terminal which folder to open.</string>
 </dict>
