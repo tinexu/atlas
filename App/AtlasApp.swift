@@ -20,6 +20,46 @@ struct AtlasApp: App {
                     .keyboardShortcut("n")
                     .disabled(model.core == nil)
             }
+            CommandGroup(after: .newItem) {
+                Button("Describe an Automation…") { model.describeAutomation() }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .disabled(model.core == nil)
+                Divider()
+                Button("Export Data…") { model.exportData() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(model.core == nil)
+                Button("Import Data…") { model.importData() }
+                    .disabled(model.core == nil)
+            }
+            GoCommands(model: model)
+            CommandMenu("Focus") {
+                if let focus = model.core?.time?.focus {
+                    if let session = model.focusSession {
+                        Button(session.state == .running ? "Pause Focus" : "Resume Focus") {
+                            session.state == .running ? focus.pause() : focus.resume()
+                        }
+                        .keyboardShortcut("p", modifiers: [.command, .control])
+                        Button("Add 10 Minutes") { focus.extend(minutes: 10) }
+                            .keyboardShortcut("=", modifiers: [.command, .control])
+                        Button("Stop Focus") { focus.stop() }
+                            .keyboardShortcut(".", modifiers: [.command, .control])
+                    } else {
+                        Button("Start Focus Session") { focus.start() }
+                            .keyboardShortcut("f", modifiers: [.command, .control])
+                    }
+                }
+            }
+            if model.showsDebugMenu {
+                CommandMenu("Debug") {
+                    Button("Open Database Folder") { model.openDatabaseFolder() }
+                    Button("Back Up Database Now") { model.backUpNow() }
+                    Button("Show Recent Events") { model.showEventLog = true }
+                        .keyboardShortcut("e", modifiers: [.command, .option])
+                    Button("Copy Logs (Last 2 Hours)") { model.copyLogs() }
+                    Divider()
+                    Button("Reset Onboarding") { model.resetOnboarding() }
+                }
+            }
             CommandMenu("Automations") {
                 Button(model.isPaused ? "Resume Automations" : "Pause Automations") {
                     model.setPaused(!model.isPaused)
@@ -49,6 +89,29 @@ struct AtlasApp: App {
             } else {
                 Image(systemName: model.isPaused ? "pause.circle" : "globe.americas.fill")
             }
+        }
+    }
+}
+
+/// Go: jump to a screen. ⌥⌘1…⌥⌘9 in sidebar order (⌘1…⌘9 activate Spaces).
+struct GoCommands: Commands {
+    @ObservedObject var model: AppModel
+
+    var body: some Commands {
+        CommandMenu("Go") {
+            ForEach(Array(AppModel.Section.allCases.prefix(9).enumerated()), id: \.element) { index, section in
+                Button(section.title) {
+                    model.section = section
+                    model.bringForward()
+                }
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command, .option])
+            }
+            Divider()
+            Button("Companion Settings") { model.section = .companion; model.bringForward() }
+            Button("Permissions") { model.section = .permissions; model.bringForward() }
+            Divider()
+            Button("Command Palette") { model.companion?.showPalette() }
+                .keyboardShortcut("k", modifiers: [.command])
         }
     }
 }

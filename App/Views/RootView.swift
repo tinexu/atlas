@@ -15,6 +15,16 @@ struct RootView: View {
                 Label("ATLAS couldn't start", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(error)
+            } actions: {
+                if let backup = model.corruptionBackup {
+                    Button("Restore Backup from \(backup.date.formatted(date: .abbreviated, time: .shortened))") { model.restoreLatestBackup() }
+                        .buttonStyle(.borderedProminent)
+                }
+                if error.contains("damaged") {
+                    Button("Start Fresh") { model.relaunch() }
+                        .help("The damaged database stays in the Backups folder")
+                }
+                Button("Open the Data Folder") { model.openDatabaseFolder() }
             }
         } else {
             NavigationSplitView {
@@ -80,6 +90,7 @@ struct RootView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .orbitOpenHealth)) { _ in model.section = .health }
             .onAppear { model.openMainWindow = { openWindow(id: "main") } }
+            .sheet(isPresented: $model.showEventLog) { EventLogView() }
         }
     }
 

@@ -69,6 +69,9 @@ final class AppModel: ObservableObject {
     @Published var pendingConfirmation: PendingConfirmation?
     @Published var errorMessage: String?
     @Published private(set) var startupError: String?
+    /// Set when the database was found damaged at launch (it's been set aside).
+    @Published private(set) var corruptionBackup: DatabaseBackups.Backup?
+    @Published var showEventLog = false
 
     let core: AtlasCore?
     let spaces: SpacesModel
@@ -111,6 +114,9 @@ final class AppModel: ObservableObject {
             companion = nil
             timeArchitect = nil
             startupError = error.localizedDescription
+            if case DataSafetyError.corrupted = error, let url = try? AtlasStore.defaultURL() {
+                corruptionBackup = DatabaseBackups.list(in: DatabaseBackups.folder(for: url)).first
+            }
             return
         }
         spaces = SpacesModel(core: core)
@@ -238,6 +244,114 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - Data safety (Stage 08)
+
+    /// Puts the latest daily backup in place, then restarts ATLAS.
+    func restoreLatestBackup() {
+        guard let backup = corruptionBackup, let url = try? AtlasStore.defaultURL() else { return }
+        do {
+            try DatabaseBackups.restore(backup, to: url)
+            relaunch()
+        } catch {
+            errorMessage = "Couldn't restore the backup: \(error.localizedDescription)"
+        }
+    }
+
+    /// Opens a new copy of ATLAS and quits this one.
+    func relaunch() {
+        let path = Bundle.main.bundlePath
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 1; /usr/bin/open \"\(path)\""]
+        try? process.run()
+        NSApp.terminate(nil)
+    }
+
+    func exportData() {
+        guard let core else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "ATLAS Export \(Date().formatted(.iso8601.year().month().day())).json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try AtlasExport.make(from: core.store).data().write(to: url, options: .atomic)
+        } catch {
+            errorMessage = "Couldn't export: \(error.localizedDescription)"
+        }
+    }
+
+    func importData() {
+        guard let core else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.message = "Workflows, Spaces, rules and settings in the file are added. Items with the same ID are replaced; nothing else is removed."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try DatabaseBackups.backUp(core.store.database, to: DatabaseBackups.folder(for: AtlasStore.defaultURL())
+                .appendingPathComponent("atlas-before-import-\(Int(Date().timeIntervalSince1970)).sqlite"))
+            let summary = try AtlasExport.read(Data(contentsOf: url)).apply(to: core.store)
+            reloadWorkflows()
+            spaces.reload()
+            orbit?.reload()
+            timeArchitect?.reload()
+            errorMessage = "Imported \(summary.workflows) workflows and \(summary.rows) other items. A backup from just before is in the Backups folder."
+        } catch {
+            errorMessage = "Couldn't import: \(error.localizedDescription)"
+        }
+    }
+
+    func openDatabaseFolder() {
+        if let url = try? AtlasStore.defaultURL() { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+    }
+
+    func backUpNow() {
+        guard let core, let url = try? AtlasStore.defaultURL() else { return }
+        do {
+            let target = DatabaseBackups.folder(for: url).appendingPathComponent("atlas-manual-\(Int(Date().timeIntervalSince1970)).sqlite")
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try DatabaseBackups.backUp(core.store.database, to: target)
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+        } catch {
+            errorMessage = "Backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Forgets that onboarding ran, so starter content is offered again next launch.
+    func resetOnboarding() {
+        guard let core else { return }
+        try? core.store.database.run("DELETE FROM user_preference WHERE key LIKE 'onboarding.%' OR key LIKE 'orbit.seeded%';")
+        errorMessage = "Onboarding reset. Starter items are added again the next time ATLAS starts (only where you have none)."
+    }
+
+    /// The last two hours of ATLAS's log, to the clipboard.
+    func copyLogs() {
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+            process.arguments = ["show", "--last", "2h", "--style", "compact", "--predicate", "subsystem == \"app.atlas\""]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try? process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            await MainActor.run {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                self.errorMessage = "Copied \(text.split(separator: "\n").count) log lines to the clipboard."
+            }
+        }
+    }
+
+    /// Whether the Debug menu shows: debug builds, or `defaults write app.atlas.ATLAS DebugMenu -bool YES`.
+    var showsDebugMenu: Bool {
+        #if DEBUG
+        return true
+        #else
+        return UserDefaults.standard.bool(forKey: "DebugMenu")
+        #endif
+    }
+
     // MARK: - Time Architect
 
     func explain(_ workflow: Workflow) -> String {
@@ -257,7 +371,7 @@ final class AppModel: ObservableObject {
 
     /// File changes in a run that can still be undone.
     func undoableOperations(in run: WorkflowRun) -> [FileOperation] {
-        ((try? core?.store.operations(runID: run.id)) ?? []).filter { $0.kind.isUndoable && $0.undoneAt == nil }
+        ((try? core?.store.operations(runID: run.id)) ?? []).filter { $0.kind.isUndoable && $0.undoneAt == nil && $0.state == .done }
     }
 
     /// Reverses a run's file changes, newest first, as one run of its own.

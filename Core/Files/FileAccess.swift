@@ -82,6 +82,20 @@ public final class FileOperationLog: @unchecked Sendable {
         }
     }
 
+    /// Records a change about to happen (no event yet).
+    public func begin(_ operation: FileOperation) {
+        do {
+            try store.logOperation(operation)
+        } catch {
+            AtlasLog.engine.error("Couldn't record a pending file change: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Forgets a change that failed before anything moved.
+    public func discard(_ operation: FileOperation) {
+        try? store.deleteOperation(id: operation.id)
+    }
+
     public func operation(id: UUID) -> FileOperation? {
         try? store.operation(id: id)
     }

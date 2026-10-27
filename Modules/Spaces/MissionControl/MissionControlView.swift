@@ -46,8 +46,8 @@ public struct MissionControlView: View {
             if isWindowVisible {
                 world
             } else {
-                Label("Paused while the window is hidden", systemImage: "pause.circle")
-                    .foregroundStyle(.secondary)
+                Label("3D paused while ATLAS is in the background (saves battery)", systemImage: "pause.circle")
+                    .foregroundStyle(.white.opacity(0.7))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 

@@ -42,8 +42,8 @@ public struct MonitorWorldView: View {
                 if isWindowVisible {
                     world(size: proxy.size)
                 } else {
-                    Label("Paused while the window is hidden", systemImage: "pause.circle")
-                        .foregroundStyle(.secondary)
+                    Label("3D paused while ATLAS is in the background (saves battery)", systemImage: "pause.circle")
+                        .foregroundStyle(.white.opacity(0.7))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 Text("Drag a window to move it · ⌥-drag to resize · it snaps to halves and thirds")

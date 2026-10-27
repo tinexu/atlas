@@ -67,6 +67,25 @@ extension ActionContext {
     func log(_ kind: FileOperation.Kind, _ source: String, to destination: String? = nil, extra: [String: String] = [:]) {
         files.log?.record(FileOperation(runID: runID, kind: kind, source: source, destination: destination, extra: extra))
     }
+
+    /// Writes the change as pending, makes it, then marks it done; if it
+    /// fails the record is dropped. A change cut short by a crash stays
+    /// pending and is settled on the next launch (`FileOperationRecovery`).
+    func journaled(_ kind: FileOperation.Kind, _ source: String, to destination: String?,
+                   _ change: () async throws -> String?) async throws -> String? {
+        var operation = FileOperation(runID: runID, kind: kind, source: source, destination: destination, state: .pending)
+        files.log?.begin(operation)
+        do {
+            let result = try await change()
+            operation.destination = result ?? destination
+            operation.state = .done
+            files.log?.record(operation)
+            return result
+        } catch {
+            files.log?.discard(operation)
+            throw error
+        }
+    }
 }
 
 public struct MoveFileAction: AtlasAction {
@@ -121,8 +140,10 @@ public struct MoveFileAction: AtlasAction {
             return ActionOutput("Skipped \(name): \((folder as NSString).lastPathComponent) already has a file with that name",
                                 values: FilePaths.outputs(path, skipped: true))
         }
-        try await context.system.moveItem(atPath: path, toPath: destination)
-        context.log(.move, path, to: destination)
+        _ = try await context.journaled(.move, path, to: destination) {
+            try await context.system.moveItem(atPath: path, toPath: destination)
+            return nil
+        }
         context.reportEffect(.file, path)
         context.reportEffect(.file, destination)
         return ActionOutput("Moved \(name) to \((folder as NSString).lastPathComponent)", values: FilePaths.outputs(destination))
@@ -173,8 +194,10 @@ public struct CopyFileAction: AtlasAction {
             return ActionOutput("Skipped \(name): \((folder as NSString).lastPathComponent) already has a file with that name",
                                 values: FilePaths.outputs(path, skipped: true))
         }
-        try await context.system.copyItem(atPath: path, toPath: destination)
-        context.log(.copy, path, to: destination)
+        _ = try await context.journaled(.copy, path, to: destination) {
+            try await context.system.copyItem(atPath: path, toPath: destination)
+            return nil
+        }
         context.reportEffect(.file, destination)
         return ActionOutput("Copied \(name) to \((folder as NSString).lastPathComponent)", values: FilePaths.outputs(destination))
     }
@@ -225,8 +248,10 @@ public struct RenameFileAction: AtlasAction {
         } else {
             return ActionOutput("Skipped: something called “\(name)” is already in that folder", values: FilePaths.outputs(path, skipped: true))
         }
-        try await context.system.moveItem(atPath: path, toPath: destination)
-        context.log(.rename, path, to: destination)
+        _ = try await context.journaled(.rename, path, to: destination) {
+            try await context.system.moveItem(atPath: path, toPath: destination)
+            return nil
+        }
         context.reportEffect(.file, path)
         context.reportEffect(.file, destination)
         return ActionOutput("Renamed to \((destination as NSString).lastPathComponent)", values: FilePaths.outputs(destination))
@@ -297,8 +322,9 @@ public struct TrashFileAction: AtlasAction {
         let path = try parameters.path("path")
         try context.files.access.require(path)
         try FilePaths.requireExisting(path, system: context.system)
-        let trashed = try await context.system.trashItem(atPath: path)
-        context.log(.trash, path, to: trashed)
+        let trashed = try await context.journaled(.trash, path, to: nil) {
+            try await context.system.trashItem(atPath: path)
+        } ?? ""
         context.reportEffect(.file, path)
         return ActionOutput("Moved \((path as NSString).lastPathComponent) to the Trash", values: ["trashPath": .string(trashed)])
     }
@@ -383,6 +409,9 @@ public struct UndoFileOperationAction: AtlasAction {
               let log = context.files.log, var operation = log.operation(id: id)
         else { throw ActionError.failed("That change isn't in the undo log any more.") }
         guard operation.undoneAt == nil else { throw ActionError.failed("“\(operation.summary)” was already undone.") }
+        guard operation.state == .done else {
+            throw ActionError.failed("“\(operation.summary)” never finished, so there's nothing to undo. \(operation.extra["recovered"] ?? "")")
+        }
         guard operation.kind.isUndoable else {
             throw ActionError.failed("“\(operation.summary)” can't be undone automatically: undoing it would mean removing something. Move it to the Trash yourself if you don't want it.")
         }

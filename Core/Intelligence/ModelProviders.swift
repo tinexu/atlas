@@ -152,6 +152,17 @@ public enum CompanionKeychain {
     }
 }
 
+extension IntentModelProvider {
+    /// `complete` with a deadline, so a stuck model can't hang a command.
+    public func complete(_ request: ModelRequest, within seconds: TimeInterval) async throws -> String {
+        do {
+            return try await withTimeout(seconds: seconds) { try await self.complete(request) }
+        } catch ActionError.timedOut {
+            throw ModelError("\(displayName) didn't answer within \(Int(seconds)) seconds.")
+        }
+    }
+}
+
 /// Pulls the JSON object out of a model's answer (bare, or wrapped in prose or a code fence).
 public func extractJSONObject(_ text: String) -> Data? {
     guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end else { return nil }

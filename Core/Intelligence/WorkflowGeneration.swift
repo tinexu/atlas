@@ -198,7 +198,7 @@ public struct WorkflowGenerator: Sendable {
                 note = "\(reason) Used ATLAS's built-in understanding instead."
             } else {
                 do {
-                    let answer = try await provider.complete(Self.request(prompt, context: context, registry: registry))
+                    let answer = try await provider.complete(Self.request(prompt, context: context, registry: registry), within: 60)
                     guard let data = extractJSONObject(answer) else { throw GenerationError.rejected("The model didn't return a workflow.") }
                     let blueprint = try JSONDecoder().decode(WorkflowBlueprint.self, from: data)
                     return try proposal(from: Self.resolveNames(blueprint, context: context), prompt: prompt, source: .ai, context: context)

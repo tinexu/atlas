@@ -23,6 +23,9 @@ public final class AtlasCore: @unchecked Sendable {
     /// Time Architect (Stage 07). Nil until `startScheduling(environment:)`.
     public private(set) var time: TimeServices?
 
+    /// The daily backup check (Stage 08).
+    var backupToken: TriggerToken?
+
     func setTime(_ services: TimeServices) {
         time = services
     }
@@ -74,7 +77,7 @@ public final class AtlasCore: @unchecked Sendable {
     #if os(macOS)
     /// The production configuration: on-disk database, real macOS adapters.
     public static func live() throws -> AtlasCore {
-        let store = try AtlasStore.live()
+        let store = try AtlasStore.openChecked(at: AtlasStore.defaultURL())
         try store.closeInterruptedRuns()
         try store.pruneRuns(keepingLatest: 1_000)
         let core = AtlasCore(
@@ -87,7 +90,11 @@ public final class AtlasCore: @unchecked Sendable {
         core.windows.startObservingDisplays()
         let environment = MacTriggerEnvironment()
         core.startTriggers(environment: environment)
-        core.startScheduling(environment: environment, calendarStore: EventKitCalendarStore())
+        core.startScheduling(environment: environment, calendarStore: TimeoutCalendarStore(EventKitCalendarStore()))
+        core.startDailyBackups(environment: environment)
+        // Settle file changes cut short last time (quit or crash mid-move).
+        let system = core.system, events = core.events
+        Task.detached(priority: .utility) { await FileOperationRecovery.reconcile(store: store, system: system, events: events) }
         return core
     }
     #endif

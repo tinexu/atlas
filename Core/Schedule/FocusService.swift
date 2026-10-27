@@ -323,8 +323,18 @@ public struct ShortcutRunAction: AtlasAction {
         process.arguments = ["run", name]
         let errors = Pipe()
         process.standardError = errors
-        try process.run()
-        process.waitUntilExit()
+        // Wait without blocking a thread; a timeout or cancel ends the shortcut.
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                process.terminationHandler = { _ in continuation.resume() }
+                do { try process.run() } catch {
+                    process.terminationHandler = nil
+                    continuation.resume(throwing: error)
+                }
+            }
+        } onCancel: {
+            if process.isRunning { process.terminate() }
+        }
         guard process.terminationStatus == 0 else {
             let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

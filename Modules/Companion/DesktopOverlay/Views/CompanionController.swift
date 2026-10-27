@@ -64,6 +64,7 @@ public final class CompanionController: ObservableObject {
     let files: FileSearch?
 
     private var machine = CompanionStateMachine()
+    private var bubblePolicy = BubblePolicy()
     private var tickWork: DispatchWorkItem?
     private var bubbleWork: DispatchWorkItem?
     private var eventTask: Task<Void, Never>?
@@ -154,6 +155,9 @@ public final class CompanionController: ObservableObject {
 
     // MARK: - Presentation
 
+    /// Idle, focus and sleep show a rendered still, so an idle Companion uses almost no CPU.
+    var isAnimating: Bool { state.usesLiveRendering }
+
     var presentation: CharacterPresentation {
         CharacterPresentation.make(for: state, intensity: settings.intensity,
                                    reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
@@ -228,10 +232,9 @@ public final class CompanionController: ObservableObject {
     /// skipped so one command shows one result.
     private func showResult(of event: AtlasEvent) {
         let trigger = event.payload["trigger"]?.stringValue ?? ""
-        let hidden: Set<String> = ["space.activated", "space.transition", RunTrigger.subworkflow, "trigger.orbit.sweep"]
-        guard !hidden.contains(trigger),
-              let runID = event.payload["runId"]?.stringValue.flatMap(UUID.init(uuidString:)),
-              let run = try? core.store.run(id: runID), run.state != .skipped || trigger == RunTrigger.companion
+        guard let runID = event.payload["runId"]?.stringValue.flatMap(UUID.init(uuidString:)),
+              let run = try? core.store.run(id: runID),
+              bubblePolicy.shouldShow(workflowID: run.workflowID, trigger: trigger, state: run.state, at: Date())
         else { return }
         let failed = run.state == .failed || run.state == .partiallySucceeded
         var bubble = StatusBubble(text: StatusMessages.message(for: run, store: core.store), isFailure: failed, runID: run.id)

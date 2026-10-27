@@ -12,7 +12,7 @@ import RealityKit
 @MainActor
 final class CharacterScene {
     let root = Entity()
-    private let camera = PerspectiveCamera()
+    let camera = PerspectiveCamera()
     /// Moves up and down (float, hop).
     private let float = Entity()
     /// Turns (thinking, shake).

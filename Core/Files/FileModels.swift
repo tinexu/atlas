@@ -274,10 +274,21 @@ public struct FileOperation: Identifiable, Hashable, Sendable {
     public var performedAt: Date
     public var undoneAt: Date?
     public var undoNote: String?
+    /// Written as `pending` before the change and `done` after, so a change
+    /// cut short by a crash or quit is found and settled on the next launch.
+    public var state: State
+
+    public enum State: String, Codable, Sendable {
+        case pending, done
+        /// Found half-done at launch and put back.
+        case rolledBack
+    }
 
     public init(id: UUID = UUID(), runID: UUID?, kind: Kind, source: String, destination: String? = nil,
-                extra: [String: String] = [:], performedAt: Date = Date(), undoneAt: Date? = nil, undoNote: String? = nil) {
+                extra: [String: String] = [:], performedAt: Date = Date(), undoneAt: Date? = nil, undoNote: String? = nil,
+                state: State = .done) {
         self.id = id
+        self.state = state
         self.runID = runID
         self.kind = kind
         self.source = source

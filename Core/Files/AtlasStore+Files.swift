@@ -490,14 +490,15 @@ extension AtlasStore {
     public func logOperation(_ operation: FileOperation) throws {
         try database.run(
             """
-            INSERT INTO file_operation (id, run_id, kind, source, destination, extra_json, performed_at, undone_at, undo_note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET undone_at = excluded.undone_at, undo_note = excluded.undo_note;
+            INSERT INTO file_operation (id, run_id, kind, source, destination, extra_json, performed_at, undone_at, undo_note, state)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET undone_at = excluded.undone_at, undo_note = excluded.undo_note,
+                destination = excluded.destination, state = excluded.state, extra_json = excluded.extra_json;
             """,
             [
                 .from(operation.id), .from(operation.runID?.uuidString), .text(operation.kind.rawValue), .text(operation.source),
                 .from(operation.destination), .text(try FileJSON.encode(operation.extra)), .from(operation.performedAt),
-                .from(operation.undoneAt), .from(operation.undoNote),
+                .from(operation.undoneAt), .from(operation.undoNote), .text(operation.state.rawValue),
             ]
         )
     }
@@ -509,6 +510,15 @@ extension AtlasStore {
 
     public func operation(id: UUID) throws -> FileOperation? {
         try database.query("SELECT * FROM file_operation WHERE id = ?;", [.from(id)]).first.flatMap(operation(from:))
+    }
+
+    /// Changes that started but never finished (ATLAS quit or crashed mid-way).
+    public func pendingOperations() throws -> [FileOperation] {
+        try database.query("SELECT * FROM file_operation WHERE state = 'pending' ORDER BY performed_at ASC;").compactMap(operation(from:))
+    }
+
+    public func deleteOperation(id: UUID) throws {
+        try database.run("DELETE FROM file_operation WHERE id = ?;", [.from(id)])
     }
 
     public func recentOperations(limit: Int = 100) throws -> [FileOperation] {
@@ -523,7 +533,8 @@ extension AtlasStore {
         return FileOperation(
             id: id, runID: row.uuid("run_id"), kind: kind, source: source, destination: row.string("destination"),
             extra: FileJSON.decode([String: String].self, row.string("extra_json")) ?? [:],
-            performedAt: row.date("performed_at") ?? Date(), undoneAt: row.date("undone_at"), undoNote: row.string("undo_note")
+            performedAt: row.date("performed_at") ?? Date(), undoneAt: row.date("undone_at"), undoNote: row.string("undo_note"),
+            state: row.string("state").flatMap(FileOperation.State.init(rawValue:)) ?? .done
         )
     }
 

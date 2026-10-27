@@ -156,7 +156,8 @@ struct CompanionOverlayView: View {
     let overlay: CompanionOverlay
 
     var body: some View {
-        CharacterView(settings: controller.settings, presentation: controller.presentation, paused: controller.isRenderingPaused)
+        CharacterView(settings: controller.settings, presentation: controller.presentation, paused: controller.isRenderingPaused,
+                      live: controller.isAnimating)
             .overlay {
                 // Gestures on a clear layer so the 3D view never swallows them.
                 Color.clear

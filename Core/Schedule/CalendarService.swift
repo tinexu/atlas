@@ -131,6 +131,7 @@ public enum CalendarError: Error, LocalizedError, Equatable {
     /// The first write to a calendar needs a yes.
     case needsConfirmation(String)
     case noCalendar
+    case timedOut
 
     public var errorDescription: String? {
         switch self {
@@ -139,6 +140,7 @@ public enum CalendarError: Error, LocalizedError, Equatable {
         case .readOnly(let name): return "ATLAS can only read “\(name)”. Allow writing to it in Time Architect → Calendar first."
         case .needsConfirmation(let name): return "Confirm that ATLAS may add events to “\(name)”."
         case .noCalendar: return "Choose a calendar to write to."
+        case .timedOut: return "Calendar didn't respond in time. Nothing was changed; try again in a moment."
         }
     }
 }
@@ -426,4 +428,55 @@ public struct UnavailableCalendarStore: CalendarStore {
     public func updateEvent(id: String, start: Date, end: Date) throws { throw CalendarError.noAccess }
     public func deleteEvent(id: String) throws { throw CalendarError.noAccess }
     public func observeChanges(_ handler: @escaping @Sendable () -> Void) -> TriggerToken { TriggerToken {} }
+}
+
+/// Bounds every EventKit call: a slow or stuck calendar daemon gives an
+/// empty result (reads) or a clear error (writes) instead of a hang.
+public final class TimeoutCalendarStore: CalendarStore, @unchecked Sendable {
+    let base: CalendarStore
+    let timeout: TimeInterval
+    private let queue = DispatchQueue(label: "app.atlas.calendar", qos: .userInitiated, attributes: .concurrent)
+
+    public init(_ base: CalendarStore, timeout: TimeInterval = 5) {
+        self.base = base
+        self.timeout = timeout
+    }
+
+    /// Nil when it didn't finish in time.
+    private func bounded<T>(_ what: String, _ body: @escaping () throws -> T) throws -> T? {
+        let semaphore = DispatchSemaphore(value: 0)
+        let box = ResultBox<T>()
+        queue.async {
+            box.result = Result(catching: body)
+            semaphore.signal()
+        }
+        guard semaphore.wait(timeout: .now() + timeout) == .success else {
+            AtlasLog.engine.error("Calendar call timed out: \(what, privacy: .public)")
+            return nil
+        }
+        return try box.result!.get()
+    }
+
+    private final class ResultBox<T>: @unchecked Sendable { var result: Result<T, Error>? }
+
+    public func access() -> CalendarAccess { base.access() }
+    public func requestAccess() async -> CalendarAccess { await base.requestAccess() }
+    public func calendars() -> [CalendarInfo] { ((try? bounded("calendars") { self.base.calendars() }) ?? nil) ?? [] }
+    public func events(from: Date, to: Date, calendarIDs: [String]) -> [CalendarEvent] {
+        ((try? bounded("events") { self.base.events(from: from, to: to, calendarIDs: calendarIDs) }) ?? nil) ?? []
+    }
+    public func event(id: String) -> CalendarEvent? { ((try? bounded("event") { self.base.event(id: id) }) ?? nil) ?? nil }
+    public func createEvent(title: String, start: Date, end: Date, calendarID: String, notes: String) throws -> String {
+        guard let id = try bounded("create", { try self.base.createEvent(title: title, start: start, end: end, calendarID: calendarID, notes: notes) }) else {
+            throw CalendarError.timedOut
+        }
+        return id
+    }
+    public func updateEvent(id: String, start: Date, end: Date) throws {
+        guard try bounded("update", { try self.base.updateEvent(id: id, start: start, end: end) }) != nil else { throw CalendarError.timedOut }
+    }
+    public func deleteEvent(id: String) throws {
+        guard try bounded("delete", { try self.base.deleteEvent(id: id) }) != nil else { throw CalendarError.timedOut }
+    }
+    public func observeChanges(_ handler: @escaping @Sendable () -> Void) -> TriggerToken { base.observeChanges(handler) }
 }

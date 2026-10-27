@@ -25,7 +25,7 @@ struct TimelineRibbonView: View {
                 if isVisible {
                     realityView
                 } else {
-                    Label("Paused while the window is hidden", systemImage: "pause.circle")
+                    Label("3D paused while ATLAS is in the background (saves battery)", systemImage: "pause.circle")
                         .foregroundStyle(.white.opacity(0.7)).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 HStack(spacing: 12) {
@@ -337,13 +337,28 @@ struct TimelineVisibilityReader: NSViewRepresentable {
             report()
         }
 
+        /// Low Power Mode and switching apps change whether 3D draws.
+        private lazy var powerObserver: [NSObjectProtocol] = [
+            NSNotification.Name.NSProcessInfoPowerStateDidChange, NSApplication.didBecomeActiveNotification,
+            NSApplication.didResignActiveNotification,
+        ].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.report() }
+            }
+        }
+
         private func report() {
-            let visible = window?.occlusionState.contains(.visible) ?? false
+            _ = powerObserver
+            // A RealityKit view redraws every frame, so 3D only draws while
+            // it's on screen, ATLAS is the app in front, and Low Power Mode is off.
+            let visible = RenderPolicy.shouldDraw(windowVisible: window?.occlusionState.contains(.visible) ?? false,
+                                                  appActive: NSApp.isActive, lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled)
             DispatchQueue.main.async { [onChange] in onChange?(visible) }
         }
 
         deinit {
             if let observer { NotificationCenter.default.removeObserver(observer) }
+            powerObserver.forEach(NotificationCenter.default.removeObserver)
         }
     }
 }

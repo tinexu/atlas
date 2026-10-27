@@ -234,3 +234,42 @@ public struct CharacterPresentation: Equatable, Sendable {
 
     public var isStill: Bool { bobAmplitude == 0 && spinSpeed == 0 && gesture == .none }
 }
+
+extension CompanionState {
+    /// Whether the live 3D view is worth its cost. A RealityKit view redraws
+    /// every frame (about two-thirds of a CPU core even when still), so idle,
+    /// focus and sleep show a rendered still image instead.
+    public var usesLiveRendering: Bool {
+        switch self {
+        case .listening, .thinking, .executing, .success, .failure: return true
+        case .idle, .focus, .sleeping: return false
+        }
+    }
+}
+
+/// Which finished runs get a speech bubble. Runs you started and every
+/// failure always do; a successful automatic run (a file rule, a schedule)
+/// at most once every 10 minutes per workflow, so a busy rule doesn't
+/// chatter. Activation internals never do.
+public struct BubblePolicy: Sendable {
+    public static let quietInterval: TimeInterval = 10 * 60
+    static let hiddenTriggers: Set<String> = ["space.activated", "space.transition", RunTrigger.subworkflow, "trigger.orbit.sweep"]
+
+    private var lastShown: [UUID: Date] = [:]
+
+    public init() {}
+
+    public mutating func shouldShow(workflowID: UUID, trigger: String, state: RunState, at now: Date) -> Bool {
+        guard !Self.hiddenTriggers.contains(trigger) else { return false }
+        if state == .skipped { return trigger == RunTrigger.companion }
+        let failed = state == .failed || state == .partiallySucceeded
+        let automatic = trigger.hasPrefix(RunTrigger.automaticPrefix)
+        if failed || !automatic {
+            lastShown[workflowID] = now
+            return true
+        }
+        if let last = lastShown[workflowID], now.timeIntervalSince(last) < Self.quietInterval { return false }
+        lastShown[workflowID] = now
+        return true
+    }
+}

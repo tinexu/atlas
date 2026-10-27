@@ -309,7 +309,7 @@ public struct IntentResolver: Sendable {
         }
         let request = AIRequest.make(text: text, registry: validator.registry, vocabulary: validator.vocabulary, context: context)
         do {
-            let answer = try await provider.complete(request.modelRequest)
+            let answer = try await provider.complete(request.modelRequest, within: 25)
             let plan = try validator.validate(try AIPlanResponse.decode(answer))
             return Result(outcome: .plan(plan), note: "Planned by \(provider.displayName). Check it before running.", usedAI: true)
         } catch {

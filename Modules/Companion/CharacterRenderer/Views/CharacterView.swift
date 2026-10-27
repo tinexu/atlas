@@ -1,26 +1,35 @@
 import AtlasCompanion
+import Metal
 import RealityKit
 import SwiftUI
 
-/// Draws the character. Uses RealityKit only while it's animated and
-/// visible; "Still" mode, a locked screen, Low Power Mode or a hidden
-/// overlay get a static drawing that costs nothing to keep on screen.
+/// Draws the character.
+///
+/// A live RealityKit view redraws every frame (about two-thirds of a CPU
+/// core even when nothing moves), so it's only on screen while the
+/// character is doing something (`live`). The rest of the time it shows a
+/// still image of the same 3D model, rendered once off-screen and cached.
+/// "Still" mode, a locked screen, Low Power Mode or a hidden overlay get
+/// the flat drawing.
 public struct CharacterView: View {
     let settings: CompanionSettings
     let presentation: CharacterPresentation
     let paused: Bool
+    let live: Bool
     @State private var scene = CharacterScene()
+    @State private var snapshot: NSImage?
 
-    public init(settings: CompanionSettings, presentation: CharacterPresentation, paused: Bool) {
+    public init(settings: CompanionSettings, presentation: CharacterPresentation, paused: Bool, live: Bool = true) {
         self.settings = settings
         self.presentation = presentation
         self.paused = paused
+        self.live = live
     }
 
     public var body: some View {
         if presentation.rendering == .staticImage || paused {
             CharacterStill(settings: settings, presentation: presentation)
-        } else {
+        } else if live {
             RealityView { content in
                 content.camera = .virtual
                 scene.root.removeFromParent()
@@ -31,7 +40,90 @@ public struct CharacterView: View {
                 scene.build(settings)
                 scene.apply(presentation)
             }
+        } else {
+            Group {
+                if let snapshot {
+                    Image(nsImage: snapshot).resizable().interpolation(.high).opacity(presentation.opacity)
+                } else {
+                    CharacterStill(settings: settings, presentation: presentation)
+                }
+            }
+            .task(id: CharacterSnapshotter.key(settings, presentation)) {
+                snapshot = await CharacterSnapshotter.shared.image(settings: settings, presentation: presentation)
+            }
         }
+    }
+}
+
+/// Renders the 3D character to an image once per look (RealityRenderer,
+/// off-screen), so an idle character costs nothing to keep on screen.
+@MainActor
+final class CharacterSnapshotter {
+    static let shared = CharacterSnapshotter()
+    static let pixels = 320
+
+    private var cache: [String: NSImage] = [:]
+    private var renderer: RealityRenderer?
+    private let scene = CharacterScene()
+    private let device = MTLCreateSystemDefaultDevice()
+
+    static func key(_ settings: CompanionSettings, _ presentation: CharacterPresentation) -> String {
+        "\(settings.character.rawValue)|\(settings.primaryColor)|\(settings.secondaryColor)|\(settings.accessory.rawValue)|\(settings.customCharacterPath ?? "")|\(presentation.accent)|\(presentation.eyesClosed)"
+    }
+
+    func image(settings: CompanionSettings, presentation: CharacterPresentation) async -> NSImage? {
+        let key = Self.key(settings, presentation)
+        if let cached = cache[key] { return cached }
+        guard let device else { return nil }
+        do {
+            let renderer = try self.renderer ?? RealityRenderer()
+            self.renderer = renderer
+            var still = presentation
+            still.bobAmplitude = 0
+            still.spinSpeed = 0
+            still.gesture = .none
+            still.opacity = 1
+            scene.build(settings)
+            scene.apply(still)
+            if renderer.entities.isEmpty { renderer.entities.append(scene.root) }
+            renderer.activeCamera = scene.camera
+            renderer.cameraSettings.colorBackground = .color(CGColor(gray: 0, alpha: 0))
+
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm_srgb, width: Self.pixels, height: Self.pixels, mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .shared
+            guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+            let output = try RealityRenderer.CameraOutput(.singleProjection(colorTexture: texture))
+            // A couple of frames so meshes and materials are uploaded.
+            for _ in 0..<3 {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    do {
+                        try renderer.updateAndRender(deltaTime: 1 / 60, cameraOutput: output, onComplete: { _ in continuation.resume() })
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            guard let image = Self.image(from: texture) else { return nil }
+            cache[key] = image
+            if cache.count > 40 { cache.removeAll() }
+            return image
+        } catch {
+            return nil
+        }
+    }
+
+    private static func image(from texture: MTLTexture) -> NSImage? {
+        let width = texture.width, height = texture.height, rowBytes = width * 4
+        var bytes = [UInt8](repeating: 0, count: rowBytes * height)
+        texture.getBytes(&bytes, bytesPerRow: rowBytes, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
+              let cgImage = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes,
+                                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                    bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue),
+                                    provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: width / 2, height: height / 2))
     }
 }
 

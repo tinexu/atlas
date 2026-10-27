@@ -475,6 +475,12 @@ enum Schema {
         );
         CREATE INDEX idx_generated_draft_workflow ON generated_workflow_draft(workflow_id);
         """,
+        // v8 — Stage 08: file changes are written as pending first, so one
+        // cut short by a crash or quit is settled on the next launch.
+        """
+        ALTER TABLE file_operation ADD COLUMN state TEXT NOT NULL DEFAULT 'done';
+        CREATE INDEX idx_file_operation_state ON file_operation(state);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

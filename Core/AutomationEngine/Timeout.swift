@@ -4,7 +4,7 @@ import Foundation
 /// than `seconds`. Unlike a task group, this returns as soon as the deadline
 /// passes even if the operation ignores cancellation (many system calls do),
 /// so one stuck app can't hang a whole workflow.
-func withTimeout<T: Sendable>(
+public func withTimeout<T: Sendable>(
     seconds: TimeInterval,
     operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
