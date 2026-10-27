@@ -30,11 +30,12 @@ public enum RoomBuilder {
         static let standard = Footprint()
         static let loft = Footprint(depth: 1.5, centerZ: -0.25, wallHeight: 1.3)
         static let library = Footprint(depth: 1.5, centerZ: -0.25, wallHeight: 1.4)
+        static let codingLab = Footprint(depth: 1.5, centerZ: -0.25, wallHeight: 1.35)
     }
 
     /// Hand-built rooms with a full and a miniature level of detail.
     public static func hasDetailLevels(_ templateID: String) -> Bool {
-        templateID == CreativeLoft.templateID || templateID == StudyLibrary.templateID
+        [CreativeLoft.templateID, StudyLibrary.templateID, CodingLab.templateID].contains(templateID)
     }
 
     /// `detail: false` asks for a lighter room where the template has one
@@ -90,6 +91,10 @@ public enum RoomBuilder {
             let library = StudyLibraryBuilder.build(objects: objects, detail: detail)
             (entity, footprint, loose) = (library.entity, .library, StudyLibrary.assign(objects).loose)
             motion = StudyLibraryMotion(parts: library.parts, reduceMotion: reduceMotion)
+        case CodingLab.templateID:
+            let lab = CodingLabBuilder.build(objects: objects, detail: detail)
+            (entity, footprint, loose) = (lab.entity, .codingLab, CodingLab.assign(objects).loose)
+            motion = CodingLabMotion(parts: lab.parts, reduceMotion: reduceMotion)
         default:
             return nil
         }

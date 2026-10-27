@@ -86,6 +86,10 @@ public struct PrimitiveAsset: TemplateAsset {
         case .globe: buildGlobe(into: root, style: style)
         case .chalkboard: buildChalkboard(into: root, style: style)
         case .book: buildBook(into: root, style: style)
+        case .keyboard: buildKeyboard(into: root, style: style)
+        case .hologram: buildHologram(into: root, style: style)
+        case .serverRack: buildServerRack(into: root, style: style)
+        case .kanban: buildKanban(into: root, style: style)
         }
         return root
     }
@@ -181,6 +185,30 @@ public struct PrimitiveAsset: TemplateAsset {
     private func buildBook(into root: Entity, style: AssetStyle) {
         root.addChild(part(.generateBox(size: [0.24, 0.02, 0.17], cornerRadius: 0.004), style.matte(style.accent), at: [0, 0.01, 0]))
         root.addChild(part(.generateBox(size: [0.22, 0.012, 0.16]), style.matte("#F4EBDD"), at: [0, 0.026, 0]))
+    }
+
+    private func buildKeyboard(into root: Entity, style: AssetStyle) {
+        root.addChild(part(.generateBox(size: [0.26, 0.02, 0.09], cornerRadius: 0.006), style.matte("#2A2A33"), at: [0, 0.01, 0]))
+        root.addChild(part(.generatePlane(width: 0.23, depth: 0.07), style.matte("#EDEBFA"), at: [0, 0.021, 0]))
+    }
+
+    private func buildHologram(into root: Entity, style: AssetStyle) {
+        root.addChild(part(.generateCylinder(height: 0.2, radius: 0.1), style.matte("#2A2A33"), at: [0, 0.1, 0]))
+        root.addChild(part(.generateBox(size: [0.1, 0.1, 0.1], cornerRadius: 0.015), style.glowing(style.accent), at: [0, 0.34, 0]))
+    }
+
+    private func buildServerRack(into root: Entity, style: AssetStyle) {
+        root.addChild(part(.generateBox(size: [0.3, 0.7, 0.25], cornerRadius: 0.02), style.matte("#2A2A33"), at: [0, 0.35, 0]))
+        root.addChild(part(.generatePlane(width: 0.2, height: 0.015), style.glowing(style.accent), at: [0, 0.55, 0.126]))
+    }
+
+    private func buildKanban(into root: Entity, style: AssetStyle) {
+        // Hangs on a wall, centred at the origin, facing +z.
+        root.addChild(part(.generateBox(size: [0.5, 0.32, 0.015], cornerRadius: 0.008), style.matte("#3A3F6E"), at: [0, 0, 0]))
+        for (index, x) in [Float(-0.15), 0, 0.15].enumerated() {
+            root.addChild(part(.generatePlane(width: 0.1, height: 0.07), style.matte(index == 1 ? style.accent : NSColor(atlasHex: "#EDEBFA")),
+                               at: [x, 0.05, 0.009]))
+        }
     }
 
     private func buildPoster(into root: Entity, style: AssetStyle) {

@@ -25,6 +25,8 @@ final class MissionControlScene {
     private var rooms: [UUID: (key: BuildKey, entity: Entity)] = [:]
     private var activeRooms: Set<UUID> = []
     private var hovered: Entity?
+    /// The RealityKit scene room motion is attached to; a new one after a pause.
+    private weak var attachedScene: RealityKit.Scene?
     private var positions: [UUID: SIMD3<Float>] = [:]
     private var rowSignature: [String] = []
     private var cameraAnimation: AnimationPlaybackController?
@@ -87,6 +89,7 @@ final class MissionControlScene {
                 world.addChild(entity)
                 if let motion = entity.components[RoomMotionComponent.self]?.motion {
                     motion.start()
+                    if let scene = root.scene { motion.attach(to: scene) }
                     motion.setActive(snapshot.isActive, animated: false)
                 }
                 rooms[snapshot.id] = (key, entity)
@@ -107,6 +110,12 @@ final class MissionControlScene {
             )
         }
         positions = layout.positions
+        if let scene = root.scene, scene !== attachedScene {
+            attachedScene = scene
+            for entry in rooms.values {
+                entry.entity.components[RoomMotionComponent.self]?.motion.attach(to: scene)
+            }
+        }
         activeRooms.formIntersection(present)
 
         let signature = layout.rows.map { "\($0.group.rawValue)@\($0.z),\($0.labelX)" }

@@ -195,7 +195,8 @@ final class SpaceLibraryTests: XCTestCase {
         for profile in profiles {
             XCTAssertNotNil(try h.store.workflow(id: profile.workflowID))
         }
-        XCTAssertEqual(try h.store.spaceObjects(spaceID: space.id).count, template.objects.count)
+        // Plus the keyboard the loft adds with the new Space's activation workflow.
+        XCTAssertEqual(try h.store.spaceObjects(spaceID: space.id).count, template.objects.count + 1)
         XCTAssertEqual(space.accentColor, template.room.accentColor)
     }
 

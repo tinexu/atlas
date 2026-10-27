@@ -384,6 +384,13 @@ protocol RoomMotion: AnyObject {
     func stop()
     /// The Space became active or inactive (`animated` false on first build).
     func setActive(_ isActive: Bool, animated: Bool)
+    /// The room is in `scene` (again, after a pause); for motion driven by
+    /// scene update events.
+    func attach(to scene: RealityKit.Scene)
+}
+
+extension RoomMotion {
+    func attach(to scene: RealityKit.Scene) {}
 }
 
 struct RoomMotionComponent: Component {

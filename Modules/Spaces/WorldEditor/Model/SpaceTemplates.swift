@@ -48,27 +48,31 @@ public enum SpaceTemplates {
 
     // MARK: - Templates
 
+    /// A calm late-night coder's loft over a city (Stage 09). The room is
+    /// drawn by `CodingLabBuilder` (AtlasSpacesUI); these objects drive its props.
     public static var codingLab: SpaceTemplate {
         let docs = "https://developer.apple.com/documentation/swift"
+        let folder = CodingLab.projectFolder()
+        func object(_ role: CodingLabRole, _ action: ActionID?, _ parameters: ActionParameters = [:]) -> SpaceObjectBlueprint {
+            SpaceObjectBlueprint(role.kind, label: role.defaultLabel, at: CodingLab.blueprintPosition(role),
+                                 action: action, parameters)
+        }
         return SpaceTemplate(
-            id: "coding-lab",
+            id: CodingLab.templateID,
             name: "Coding Lab",
-            summary: "Terminal, Swift documentation in Safari and your home folder.",
+            summary: "A night loft over the city: your code editor, Terminal in your project, the repo, GitHub and a task board.",
             symbolName: "chevron.left.forwardslash.chevron.right",
             group: .work,
-            room: RoomLayout(floorColor: "#3A3F4B", wallColor: "#D9DEE7", accentColor: "#3B82F6", lighting: .cool),
+            room: RoomLayout(floorColor: "#3C3F55", wallColor: "#2B2F5A", accentColor: "#B9A8F0", lighting: .cool),
             objects: [
-                SpaceObjectBlueprint(.monitor, label: "Swift docs", at: [0.05, 0, -0.6],
-                                     action: OpenURLAction.id, ["url": .string(docs), "bundleId": .string(App.safari)]),
-                SpaceObjectBlueprint(.terminal, label: "Terminal", at: [-0.5, 0, -0.45], yaw: 25,
-                                     action: LaunchApplicationAction.id, ["bundleId": .string(App.terminal)]),
-                SpaceObjectBlueprint(.bookshelf, label: "Home folder", at: [-0.82, 0, 0.35], yaw: 90,
-                                     action: RevealInFinderAction.id, ["path": "~"]),
-                SpaceObjectBlueprint(.clock, label: "Calendar", at: [0.6, 0.78, -0.96],
-                                     action: LaunchApplicationAction.id, ["bundleId": .string(App.calendar)]),
-                SpaceObjectBlueprint(.lamp, at: [0.62, 0, -0.55]),
-                SpaceObjectBlueprint(.cube, at: [0.45, 0, 0.45], yaw: 20),
-                SpaceObjectBlueprint(.poster, at: [-0.97, 0.6, -0.4], yaw: 90),
+                object(.ultrawide, LaunchApplicationAction.id, ["bundleId": .string(CodingLab.editorBundleID())]),
+                object(.portrait, OpenFileAction.id, ["path": .string(folder), "bundleId": .string(App.terminal)]),
+                object(.hologram, OpenFileAction.id, ["path": .string(folder)]),
+                object(.serverRack, OpenURLAction.id, ["url": .string(CodingLab.githubURL)]),
+                object(.kanban, OpenURLAction.id, ["url": .string(CodingLab.taskBoardURL)]),
+                object(.mug, "timer.focus.start", ["minutes": 25]),
+                // The keyboard runs this Space's activation; it's added with
+                // the new Space's workflow by `upgradeCodingLabs()`.
             ],
             profiles: [
                 ProfileBlueprint(

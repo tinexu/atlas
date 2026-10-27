@@ -8,6 +8,14 @@ public protocol DioramaRole: Hashable, CaseIterable, Sendable where AllCases == 
     /// The object kind that plays this role.
     var kind: SpaceObjectKind { get }
     var defaultLabel: String { get }
+    /// Other kinds that can play this role, but only when the object
+    /// already runs something (e.g. an older "Home folder" bookshelf as
+    /// the Coding Lab's project hologram).
+    var alternateKinds: [SpaceObjectKind] { get }
+}
+
+extension DioramaRole {
+    public var alternateKinds: [SpaceObjectKind] { [] }
 }
 
 public struct DioramaAssignment<Role: DioramaRole>: Equatable, Sendable {
@@ -27,7 +35,8 @@ public enum Diorama {
         var used = Set<UUID>()
         for role in Role.allCases {
             let candidates = objects.filter { $0.kind == role.kind && !used.contains($0.id) }
-            if let chosen = candidates.first(where: \.hasAssignment) ?? candidates.first {
+            let alternates = objects.filter { role.alternateKinds.contains($0.kind) && $0.hasAssignment && !used.contains($0.id) }
+            if let chosen = candidates.first(where: \.hasAssignment) ?? alternates.first ?? candidates.first {
                 result.roles[role] = chosen
                 used.insert(chosen.id)
             }
@@ -64,6 +73,7 @@ extension SpaceLibrary {
     public func upgradeDioramaRooms() throws {
         try upgradeCreativeStudios()
         try upgradeStudyLibraries()
+        try upgradeCodingLabs()
     }
 
     /// Runs `objects` once per Space of `templateID` (tracked by `key`) and

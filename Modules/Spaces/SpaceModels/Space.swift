@@ -130,6 +130,8 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
     case easel, neon, mug
     /// Stage 09 (Study Library reading room).
     case globe, chalkboard, book
+    /// Stage 09 (Coding Lab night loft).
+    case keyboard, hologram, serverRack, kanban
 
     public var title: String {
         switch self {
@@ -146,6 +148,10 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
         case .globe: return "Globe"
         case .chalkboard: return "Chalkboard"
         case .book: return "Book"
+        case .keyboard: return "Keyboard"
+        case .hologram: return "Hologram"
+        case .serverRack: return "Server Rack"
+        case .kanban: return "Task Board"
         }
     }
 
@@ -164,6 +170,10 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
         case .globe: return "globe.americas"
         case .chalkboard: return "rectangle.and.pencil.and.ellipsis"
         case .book: return "book"
+        case .keyboard: return "keyboard"
+        case .hologram: return "cube.transparent"
+        case .serverRack: return "server.rack"
+        case .kanban: return "rectangle.split.3x1"
         }
     }
 }
