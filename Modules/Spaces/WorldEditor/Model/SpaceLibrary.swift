@@ -74,7 +74,7 @@ public final class SpaceLibrary: @unchecked Sendable {
             }
         }
         announce(AtlasEvent.Name.spaceSaved, space.id)
-        if template.id == CreativeLoft.templateID { try upgradeCreativeStudios() }
+        try upgradeDioramaRooms()
         return space
     }
 

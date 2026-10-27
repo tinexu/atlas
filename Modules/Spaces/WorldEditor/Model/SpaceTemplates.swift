@@ -86,25 +86,29 @@ public enum SpaceTemplates {
         )
     }
 
+    /// A cozy evening reading room (Stage 09). The room is drawn by
+    /// `StudyLibraryBuilder` (AtlasSpacesUI); these objects drive its props.
     public static var studyLibrary: SpaceTemplate {
-        SpaceTemplate(
-            id: "study-library",
+        func object(_ role: StudyLibraryRole, _ action: ActionID?, _ parameters: ActionParameters = [:]) -> SpaceObjectBlueprint {
+            SpaceObjectBlueprint(role.kind, label: role.defaultLabel, at: StudyLibrary.blueprintPosition(role),
+                                 action: action, parameters)
+        }
+        return SpaceTemplate(
+            id: StudyLibrary.templateID,
             name: "Study Library",
-            summary: "Notes, Calendar, a reference in Safari and your Documents folder.",
+            summary: "A sage-and-walnut reading room: your notes folder, a study timer, Calendar and your research link.",
             symbolName: "books.vertical",
             group: .school,
             transitionBehavior: .hidePrevious,
-            room: RoomLayout(floorColor: "#6B4F3A", wallColor: "#EFE6D8", accentColor: "#10B981", lighting: .warm),
+            room: RoomLayout(floorColor: "#C9A27E", wallColor: "#A9BBA3", accentColor: "#6F8A6E", lighting: .warm),
             objects: [
-                SpaceObjectBlueprint(.bookshelf, label: "Documents", at: [-0.45, 0, -0.85],
-                                     action: RevealInFinderAction.id, ["path": "~/Documents"]),
-                SpaceObjectBlueprint(.bookshelf, at: [0.2, 0, -0.85]),
-                SpaceObjectBlueprint(.monitor, label: "Notes", at: [0.1, 0, -0.2],
-                                     action: LaunchApplicationAction.id, ["bundleId": .string(App.notes)]),
-                SpaceObjectBlueprint(.clock, label: "Calendar", at: [0.7, 0.78, -0.96],
-                                     action: LaunchApplicationAction.id, ["bundleId": .string(App.calendar)]),
-                SpaceObjectBlueprint(.lamp, at: [-0.4, 0, 0.1]),
-                SpaceObjectBlueprint(.poster, at: [-0.97, 0.62, 0.25], yaw: 90),
+                object(.bookshelf, OpenFileAction.id, ["path": "~/Documents"]),
+                object(.lamp, "timer.focus.start", ["minutes": .number(Double(StudyLibrary.focusMinutes))]),
+                object(.calendar, LaunchApplicationAction.id, ["bundleId": .string(App.calendar)]),
+                object(.globe, OpenURLAction.id, ["url": .string(StudyLibrary.researchURL)]),
+                object(.chalkboard, OpenFileAction.id, ["path": "~/Documents"]),
+                // The open book runs this Space's activation; it's added with
+                // the new Space's workflow by `upgradeStudyLibraries()`.
             ],
             profiles: [
                 ProfileBlueprint(

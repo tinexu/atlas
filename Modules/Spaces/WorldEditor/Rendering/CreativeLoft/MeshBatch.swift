@@ -90,8 +90,8 @@ struct LoftGeometry {
     }
 
     /// A cylinder along y, centred on the origin.
-    static func generateCylinder(height: Float, radius: Float, segments: Int = 16) -> LoftGeometry {
-        cone(height: height, bottom: radius, top: radius, segments: segments)
+    static func generateCylinder(height: Float, radius: Float, segments: Int = 16, capped: Bool = true) -> LoftGeometry {
+        cone(height: height, bottom: radius, top: radius, segments: segments, capped: capped)
     }
 
     /// A cone along y, centred on the origin, tip up.
@@ -99,7 +99,7 @@ struct LoftGeometry {
         cone(height: height, bottom: radius, top: 0, segments: segments)
     }
 
-    private static func cone(height: Float, bottom: Float, top: Float, segments: Int) -> LoftGeometry {
+    private static func cone(height: Float, bottom: Float, top: Float, segments: Int, capped: Bool = true) -> LoftGeometry {
         var g = LoftGeometry()
         let h = height / 2
         let slope = (bottom - top) / height
@@ -115,7 +115,7 @@ struct LoftGeometry {
             let a = index * 2
             g.quad(a, a + 2, a + 3, a + 1)
         }
-        for (y, radius, up) in [(h, top, Float(1)), (-h, bottom, -1)] where radius > 0 {
+        for (y, radius, up) in [(h, top, Float(1)), (-h, bottom, -1)] where capped && radius > 0 {
             let center = UInt32(g.positions.count)
             g.vertex([0, y, 0], [0, up, 0], [0.5, 0.5])
             for index in 0...segments {
@@ -158,6 +158,54 @@ struct LoftGeometry {
         g.vertex([w, h, 0], [0, 0, 1], [1, 1])
         g.vertex([-w, h, 0], [0, 0, 1], [0, 1])
         g.quad(0, 1, 2, 3)
+        return g
+    }
+}
+
+extension LoftGeometry {
+    /// The same surface plus a flipped copy, so it shows from both sides
+    /// (open shades, thin cloth).
+    func doubleSided() -> LoftGeometry {
+        var g = self
+        let count = UInt32(positions.count)
+        g.positions += positions
+        g.normals += normals.map { -$0 }
+        g.uvs += uvs
+        for index in stride(from: 0, to: indices.count, by: 3) {
+            g.indices += [indices[index] + count, indices[index + 2] + count, indices[index + 1] + count]
+        }
+        return g
+    }
+
+    /// Half a tube along x with the arch on top (y ≥ 0) and the bottom
+    /// open, both sides visible: a banker's-lamp shade.
+    static func halfTube(length: Float, radius: Float, segments: Int = 12) -> LoftGeometry {
+        var g = LoftGeometry()
+        let half = length / 2
+        for index in 0...segments {
+            let angle = Float.pi * Float(index) / Float(segments)
+            let normal = SIMD3<Float>(0, sin(angle), cos(angle))
+            g.vertex([-half, normal.y * radius, normal.z * radius], normal, [0, Float(index) / Float(segments)])
+            g.vertex([half, normal.y * radius, normal.z * radius], normal, [1, Float(index) / Float(segments)])
+        }
+        for index in 0..<UInt32(segments) {
+            let a = index * 2
+            g.quad(a, a + 1, a + 3, a + 2)
+        }
+        return g.doubleSided()
+    }
+
+    /// A flat convex polygon in the xz plane at height `y`, facing up.
+    static func flatPolygon(_ points: [SIMD2<Float>], y: Float) -> LoftGeometry {
+        var g = LoftGeometry()
+        guard points.count >= 3 else { return g }
+        for point in points { g.vertex([point.x, y, point.y], [0, 1, 0], [point.x, point.y]) }
+        // Fan from the first point, wound to face +y whichever way the points run.
+        let a = SIMD3(points[0].x, 0, points[0].y), b = SIMD3(points[1].x, 0, points[1].y), c = SIMD3(points[2].x, 0, points[2].y)
+        let up = simd_cross(b - a, c - a).y > 0
+        for index in 1..<UInt32(points.count - 1) {
+            g.indices += up ? [0, index, index + 1] : [0, index + 1, index]
+        }
         return g
     }
 }
@@ -293,4 +341,51 @@ enum LoftShapes {
         batch.add(unitSphere, at: [0, -height / 2 + radius, 0], scale: SIMD3(repeating: radius))
         return batch.geometry
     }
+}
+
+/// Collects meshes per material slot, then makes one entity per slot.
+@MainActor
+final class Batches<Key: Hashable> {
+    private let material: (Key) -> any RealityKit.Material
+    private var batches: [Key: MeshBatch] = [:]
+    private var order: [Key] = []
+
+    init(material: @escaping (Key) -> any RealityKit.Material) {
+        self.material = material
+    }
+
+    func add(_ key: Key, _ mesh: LoftGeometry, at position: SIMD3<Float>,
+             rotation: simd_quatf = simd_quatf(angle: 0, axis: [0, 1, 0]), scale: SIMD3<Float> = .one) {
+        if batches[key] == nil { order.append(key) }
+        batches[key, default: MeshBatch()].add(mesh, at: position, rotation: rotation, scale: scale)
+    }
+
+    func add(_ key: Key, _ mesh: LoftGeometry, matrix: float4x4) {
+        if batches[key] == nil { order.append(key) }
+        batches[key, default: MeshBatch()].add(mesh, matrix: matrix)
+    }
+
+    func flush(into parent: Entity) {
+        for key in order {
+            guard let batch = batches[key], let entity = batch.entity(material(key)) else { continue }
+            parent.addChild(entity)
+        }
+        batches = [:]
+        order = []
+    }
+}
+
+/// Ambient motion and activation effects of a hand-built room. Kept on the
+/// room entity (`RoomMotionComponent`) so Mission Control can drive it.
+@MainActor
+protocol RoomMotion: AnyObject {
+    /// Starts the loops; called once the room is in the scene.
+    func start()
+    func stop()
+    /// The Space became active or inactive (`animated` false on first build).
+    func setActive(_ isActive: Bool, animated: Bool)
+}
+
+struct RoomMotionComponent: Component {
+    let motion: any RoomMotion
 }

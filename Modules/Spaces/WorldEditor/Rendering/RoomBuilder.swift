@@ -29,14 +29,20 @@ public enum RoomBuilder {
         var front: Float { centerZ + depth / 2 }
         static let standard = Footprint()
         static let loft = Footprint(depth: 1.5, centerZ: -0.25, wallHeight: 1.3)
+        static let library = Footprint(depth: 1.5, centerZ: -0.25, wallHeight: 1.4)
+    }
+
+    /// Hand-built rooms with a full and a miniature level of detail.
+    public static func hasDetailLevels(_ templateID: String) -> Bool {
+        templateID == CreativeLoft.templateID || templateID == StudyLibrary.templateID
     }
 
     /// `detail: false` asks for a lighter room where the template has one
-    /// (the Creative Studio loft's miniature); other rooms ignore it.
+    /// (the hand-built rooms' miniatures); other rooms ignore it.
     public static func build(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool = true,
                              reduceMotion: Bool = false) -> Entity {
-        if space.templateID == CreativeLoft.templateID {
-            return buildLoft(space: space, room: room, objects: objects, detail: detail, reduceMotion: reduceMotion)
+        if let diorama = buildDiorama(space: space, room: room, objects: objects, detail: detail, reduceMotion: reduceMotion) {
+            return diorama
         }
         let accent = NSColor(atlasHex: space.accentColor)
         let style = AssetStyle(accent: accent, glow: NSColor(atlasHex: room.lighting.glowColor), tint: room.lighting.tint)
@@ -70,22 +76,32 @@ public enum RoomBuilder {
         return root
     }
 
-    /// The Creative Studio: the loft draws its own shell and props, which
-    /// stand in for the Space's objects by role. Objects with an action but
-    /// no prop are drawn as usual where they're stored.
-    static func buildLoft(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool, reduceMotion: Bool) -> Entity {
+    /// The hand-built rooms draw their own shell and props, which stand in
+    /// for the Space's objects by role. Objects with an action but no prop
+    /// are drawn as usual where they're stored.
+    static func buildDiorama(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool, reduceMotion: Bool) -> Entity? {
+        let entity: Entity, motion: any RoomMotion, footprint: Footprint, loose: [SpaceObject]
+        switch space.templateID {
+        case CreativeLoft.templateID:
+            let loft = CreativeLoftBuilder.build(objects: objects, detail: detail)
+            (entity, footprint, loose) = (loft.entity, .loft, CreativeLoft.assign(objects).loose)
+            motion = CreativeLoftMotion(parts: loft.parts, reduceMotion: reduceMotion)
+        case StudyLibrary.templateID:
+            let library = StudyLibraryBuilder.build(objects: objects, detail: detail)
+            (entity, footprint, loose) = (library.entity, .library, StudyLibrary.assign(objects).loose)
+            motion = StudyLibraryMotion(parts: library.parts, reduceMotion: reduceMotion)
+        default:
+            return nil
+        }
         let accent = NSColor(atlasHex: space.accentColor)
         let style = AssetStyle(accent: accent, glow: NSColor(atlasHex: room.lighting.glowColor), tint: room.lighting.tint)
         let root = Entity()
         root.name = roomName(space.id)
-
-        let loft = CreativeLoftBuilder.build(objects: objects, detail: detail)
-        root.addChild(loft.entity)
-        root.components.set(CreativeLoftMotionComponent(motion: CreativeLoftMotion(parts: loft.parts, reduceMotion: reduceMotion)))
-        addChrome(to: root, name: space.name, accent: accent, footprint: .loft)
-
+        root.addChild(entity)
+        root.components.set(RoomMotionComponent(motion: motion))
+        addChrome(to: root, name: space.name, accent: accent, footprint: footprint)
         if detail {
-            for object in CreativeLoft.assign(objects).loose {
+            for object in loose {
                 root.addChild(objectEntity(object, style: style))
             }
         }

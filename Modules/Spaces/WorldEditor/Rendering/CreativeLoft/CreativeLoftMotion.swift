@@ -5,7 +5,7 @@ import RealityKit
 /// All of it runs on RealityKit's animation clock (no timers or per-frame
 /// code), and none of it starts under Reduce Motion.
 @MainActor
-final class CreativeLoftMotion {
+final class CreativeLoftMotion: RoomMotion {
     let parts: CreativeLoftParts
     let reduceMotion: Bool
     private var started = false
@@ -76,14 +76,12 @@ final class CreativeLoftMotion {
         celebration?.cancel()
     }
 
+    func setActive(_ isActive: Bool, animated: Bool) {
+        if isActive, animated { celebrate(baseIntensity: CreativeLoftPalette.current.pendantIntensity) }
+    }
+
     private func loop<Value>(_ entity: Entity, _ animation: FromToByAnimation<Value>) {
         guard let resource = try? AnimationResource.generate(with: animation) else { return }
         entity.playAnimation(resource.repeat())
     }
-}
-
-/// Keeps a loft's motion with its room entity, so Mission Control can find
-/// it without tracking loft rooms separately.
-struct CreativeLoftMotionComponent: Component {
-    let motion: CreativeLoftMotion
 }

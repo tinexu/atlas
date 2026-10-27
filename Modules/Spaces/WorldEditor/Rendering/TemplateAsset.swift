@@ -83,6 +83,9 @@ public struct PrimitiveAsset: TemplateAsset {
         case .easel: buildEasel(into: root, style: style)
         case .neon: buildNeon(into: root, style: style)
         case .mug: buildMug(into: root, style: style)
+        case .globe: buildGlobe(into: root, style: style)
+        case .chalkboard: buildChalkboard(into: root, style: style)
+        case .book: buildBook(into: root, style: style)
         }
         return root
     }
@@ -161,6 +164,23 @@ public struct PrimitiveAsset: TemplateAsset {
         root.addChild(part(.generateCylinder(height: 0.025, radius: 0.09), metal, at: [0, 0.0125, 0]))
         root.addChild(part(.generateCylinder(height: 0.5, radius: 0.012), metal, at: [0, 0.27, 0]))
         root.addChild(part(.generateCone(height: 0.16, radius: 0.12), style.glowing(style.glow), at: [0, 0.56, 0]))
+    }
+
+    private func buildGlobe(into root: Entity, style: AssetStyle) {
+        root.addChild(part(.generateCylinder(height: 0.02, radius: 0.08), style.matte("#C9A15A"), at: [0, 0.01, 0]))
+        root.addChild(part(.generateCylinder(height: 0.2, radius: 0.012), style.matte("#C9A15A"), at: [0, 0.11, 0]))
+        root.addChild(part(.generateSphere(radius: 0.12), style.matte(style.accent), at: [0, 0.32, 0]))
+    }
+
+    private func buildChalkboard(into root: Entity, style: AssetStyle) {
+        // Hangs on a wall, centred at the origin, facing +z.
+        root.addChild(part(.generateBox(size: [0.5, 0.36, 0.02], cornerRadius: 0.008), style.matte("#7A5238"), at: [0, 0, 0]))
+        root.addChild(part(.generatePlane(width: 0.44, height: 0.3), style.matte("#3F5A4A"), at: [0, 0, 0.011]))
+    }
+
+    private func buildBook(into root: Entity, style: AssetStyle) {
+        root.addChild(part(.generateBox(size: [0.24, 0.02, 0.17], cornerRadius: 0.004), style.matte(style.accent), at: [0, 0.01, 0]))
+        root.addChild(part(.generateBox(size: [0.22, 0.012, 0.16]), style.matte("#F4EBDD"), at: [0, 0.026, 0]))
     }
 
     private func buildPoster(into root: Entity, style: AssetStyle) {

@@ -32,7 +32,7 @@ final class MissionControlScene {
     private var hasFramedWorld = false
 
     init() {
-        CreativeLoftMotionComponent.registerComponent()
+        RoomMotionComponent.registerComponent()
         RoomBuilder.HoverComponent.registerComponent()
         camera.camera.fieldOfViewInDegrees = 45
         root.addChild(camera)
@@ -68,35 +68,33 @@ final class MissionControlScene {
         }
 
         for snapshot in snapshots {
-            // The loft is detailed only when selected (and the camera is close);
-            // other rooms have a single level of detail.
-            let isLoft = snapshot.space.templateID == CreativeLoft.templateID
-            let key = BuildKey(geometry: snapshot.geometry, detail: !isLoft || snapshot.id == selection,
-                               reduceMotion: isLoft && reduceMotion)
+            // Hand-built rooms are detailed only when selected (and the camera
+            // is close); other rooms have a single level of detail.
+            let levels = RoomBuilder.hasDetailLevels(snapshot.space.templateID)
+            let key = BuildKey(geometry: snapshot.geometry, detail: !levels || snapshot.id == selection,
+                               reduceMotion: levels && reduceMotion)
             let entity: Entity
             if let existing = rooms[snapshot.id], existing.key == key {
                 entity = existing.entity
             } else {
                 if let old = rooms[snapshot.id]?.entity {
-                    old.components[CreativeLoftMotionComponent.self]?.motion.stop()
+                    old.components[RoomMotionComponent.self]?.motion.stop()
                     old.removeFromParent()
                     if let hovered, sequence(first: hovered, next: \.parent).contains(where: { $0 === old }) { self.hovered = nil }
                 }
                 entity = RoomBuilder.build(space: snapshot.space, room: snapshot.room, objects: snapshot.objects,
                                            detail: key.detail, reduceMotion: reduceMotion)
                 world.addChild(entity)
-                entity.components[CreativeLoftMotionComponent.self]?.motion.start()
+                if let motion = entity.components[RoomMotionComponent.self]?.motion {
+                    motion.start()
+                    motion.setActive(snapshot.isActive, animated: false)
+                }
                 rooms[snapshot.id] = (key, entity)
             }
-            if snapshot.isActive, !activeRooms.contains(snapshot.id) {
-                // Only a change celebrates, not a room that was already active.
-                if hasFramedWorld {
-                    entity.components[CreativeLoftMotionComponent.self]?.motion
-                        .celebrate(baseIntensity: CreativeLoftPalette.current.pendantIntensity)
-                }
-                activeRooms.insert(snapshot.id)
-            } else if !snapshot.isActive {
-                activeRooms.remove(snapshot.id)
+            if snapshot.isActive != activeRooms.contains(snapshot.id) {
+                // Only a change animates, not a room that was already active.
+                entity.components[RoomMotionComponent.self]?.motion.setActive(snapshot.isActive, animated: hasFramedWorld)
+                if snapshot.isActive { activeRooms.insert(snapshot.id) } else { activeRooms.remove(snapshot.id) }
             }
             if let position = layout.positions[snapshot.id], entity.position != position {
                 entity.position = position

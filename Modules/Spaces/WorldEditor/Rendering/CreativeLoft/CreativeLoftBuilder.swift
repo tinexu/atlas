@@ -34,7 +34,7 @@ enum CreativeLoftBuilder {
         loft.position = offset
         var parts = CreativeLoftParts()
 
-        let shell = Batches(m)
+        let shell = Batches<LoftMaterial>(m)
         buildShell(shell, detail: detail)
         buildWindow(shell, detail: detail)
         buildRug(shell)
@@ -46,8 +46,8 @@ enum CreativeLoftBuilder {
         shell.flush(into: loft)
 
         // Interactive props: each its own entity, so it can lift and glow.
-        func prop(_ role: CreativeLoftRole, _ build: (Batches) -> Void, extra: ((Entity) -> Void)? = nil) {
-            let batches = Batches(m)
+        func prop(_ role: CreativeLoftRole, _ build: (Batches<LoftMaterial>) -> Void, extra: ((Entity) -> Void)? = nil) {
+            let batches = Batches<LoftMaterial>(m)
             build(batches)
             let container = Entity()
             if let object = assignment.roles[role] {
@@ -91,7 +91,7 @@ enum CreativeLoftBuilder {
         }
 
         // Fairy lights across the top of the back wall.
-        let wire = Batches(m)
+        let wire = Batches<LoftMaterial>(m)
         let bulbCount = 9
         for index in 0..<bulbCount {
             let t = Float(index) / Float(bulbCount - 1)
@@ -130,7 +130,7 @@ enum CreativeLoftBuilder {
             // Dust motes drifting in the sunbeam: three slow groups.
             var random = SystemRandomNumberGenerator()
             for group in 0..<3 {
-                let motes = Batches(m)
+                let motes = Batches<LoftMaterial>(m)
                 for _ in 0..<8 {
                     motes.add(.bulb, LoftShapes.unitSphere, at: [Float.random(in: -0.2...1.3, using: &random), Float.random(in: 0.4...1.9, using: &random),
                                                                  Float.random(in: -1.3 ... -0.3, using: &random)], scale: SIMD3(repeating: 0.006))
@@ -193,7 +193,7 @@ enum CreativeLoftBuilder {
 
     // MARK: - Shell
 
-    static func buildShell(_ b: Batches, detail: Bool) {
+    static func buildShell(_ b: Batches<LoftMaterial>, detail: Bool) {
         b.add(.floor, rbox(4.0, 0.08, 3.0, 0.04), at: [0, -0.04, 0])
         if detail {
             // Terrazzo chips: a few dozen tiny flat discs, merged per colour.
@@ -225,7 +225,7 @@ enum CreativeLoftBuilder {
         b.add(.brass, box(0.7, 0.01, 0.012), at: [1.65, 1.0, -1.494])
     }
 
-    static func buildWindow(_ b: Batches, detail: Bool) {
+    static func buildWindow(_ b: Batches<LoftMaterial>, detail: Bool) {
         let cx: Float = 0.6, z: Float = -1.5
         // Sky 10 cm behind the opening.
         b.add(.sky, .generatePlane(width: 1.6, height: 1.7), at: [cx, 1.45, -1.72])
@@ -248,7 +248,7 @@ enum CreativeLoftBuilder {
         b.add(.paint(CreativeLoftPalette.current.rose), LoftShapes.unitSphere, at: [cx + 0.5, 0.62, -1.36], scale: [0.11, 0.11, 0.06])
     }
 
-    static func buildRug(_ b: Batches) {
+    static func buildRug(_ b: Batches<LoftMaterial>) {
         b.add(.cream, .generateCylinder(height: 0.01, radius: 0.9, segments: 48), at: [0.1, 0.005, 0.35])
         b.add(.paint(CreativeLoftPalette.current.rose), .generateCylinder(height: 0.012, radius: 0.75, segments: 48), at: [0.1, 0.006, 0.35])
         b.add(.paint(CreativeLoftPalette.current.blush), .generateCylinder(height: 0.014, radius: 0.5, segments: 48), at: [0.1, 0.007, 0.35])
@@ -256,7 +256,7 @@ enum CreativeLoftBuilder {
 
     // MARK: - Desk
 
-    static func buildDesk(_ b: Batches, detail: Bool) {
+    static func buildDesk(_ b: Batches<LoftMaterial>, detail: Bool) {
         let x: Float = -0.9, z: Float = -0.6
         b.add(.wood, rbox(1.5, 0.04, 0.7, 0.02), at: [x, 0.75, z])
         for dx in [Float(-0.7), 0.7] {
@@ -285,21 +285,21 @@ enum CreativeLoftBuilder {
         b.add(.brass, .generateCylinder(height: 0.02, radius: 0.22), at: [x, 0.01, z + 0.55])
     }
 
-    static func buildMonitor(_ b: Batches) {
+    static func buildMonitor(_ b: Batches<LoftMaterial>) {
         let x: Float = -0.9, z: Float = -0.78
         b.add(.brass, .generateCylinder(height: 0.015, radius: 0.09), at: [x, 0.778, z])
         b.add(.brass, .generateCylinder(height: 0.2, radius: 0.012), at: [x, 0.87, z])
         b.add(.mauveDark, rbox(0.7, 0.42, 0.03, 0.02), at: [x, 1.05, z])
     }
 
-    static func buildMug(_ b: Batches) {
+    static func buildMug(_ b: Batches<LoftMaterial>) {
         let x: Float = -0.45, z: Float = -0.45
         b.add(.ceramicRose, .generateCylinder(height: 0.09, radius: 0.04), at: [x, 0.815, z])
         b.add(.ceramicRose, LoftShapes.ring(radius: 0.025, thickness: 0.006, segments: 10),
               at: [x + 0.045, 0.815, z], rotation: simd_quatf(angle: .pi / 2, axis: [1, 0, 0]))
     }
 
-    static func buildPendant(_ b: Batches) {
+    static func buildPendant(_ b: Batches<LoftMaterial>) {
         let x: Float = -0.9, z: Float = -0.6
         b.add(.brass, .generateCylinder(height: 0.9, radius: 0.004), at: [x, 2.15, z])
         b.add(.brass, .generateCone(height: 0.18, radius: 0.2), at: [x, 1.74, z])
@@ -308,7 +308,7 @@ enum CreativeLoftBuilder {
 
     // MARK: - Easel
 
-    static func buildEasel(_ b: Batches, detail: Bool) {
+    static func buildEasel(_ b: Batches<LoftMaterial>, detail: Bool) {
         let x: Float = 1.3, z: Float = -0.2
         for (dx, tilt) in [(Float(-0.25), Float(-0.14)), (0.25, 0.14)] {
             b.add(.wood, .generateCylinder(height: 1.6, radius: 0.02), at: [x + dx, 0.78, z + 0.05],
@@ -344,14 +344,14 @@ enum CreativeLoftBuilder {
         }
     }
 
-    static func buildPouf(_ b: Batches) {
+    static func buildPouf(_ b: Batches<LoftMaterial>) {
         b.add(.velvet, .generateCylinder(height: 0.3, radius: 0.25), at: [0.75, 0.15, 0.4])
         b.add(.velvet, LoftShapes.unitSphere, at: [0.75, 0.3, 0.4], scale: [0.25, 0.06, 0.25])
     }
 
     // MARK: - Left wall
 
-    static func buildShelves(_ b: Batches) {
+    static func buildShelves(_ b: Batches<LoftMaterial>) {
         for y in [Float(1.3), 1.7] {
             b.add(.wood, rbox(0.25, 0.03, 1.0, 0.01), at: [-1.875, y, 0.1])
             for z in [Float(-0.3), 0.5] {
@@ -361,7 +361,7 @@ enum CreativeLoftBuilder {
         }
     }
 
-    static func buildShelfDecor(_ b: Batches) {
+    static func buildShelfDecor(_ b: Batches<LoftMaterial>) {
         let palette = CreativeLoftPalette.current
         // Paint jars with cream lids.
         for (index, hex) in [palette.rose, palette.peach, palette.sage, palette.berry, palette.mauve].enumerated() {
@@ -385,7 +385,7 @@ enum CreativeLoftBuilder {
         }
     }
 
-    static func buildNeon(_ b: Batches) {
+    static func buildNeon(_ b: Batches<LoftMaterial>) {
         // A heart outline on the left wall, as a dense string of small spheres.
         for index in 0..<64 {
             let t = Float(index) / 64 * 2 * .pi
@@ -395,7 +395,7 @@ enum CreativeLoftBuilder {
         }
     }
 
-    static func buildPegboard(_ b: Batches) {
+    static func buildPegboard(_ b: Batches<LoftMaterial>) {
         let x: Float = -1.1, y: Float = 1.6, z: Float = -1.485
         b.add(.cream, rbox(1.0, 0.7, 0.03, 0.012), at: [x, y, z])
         for row in 0..<4 {
@@ -424,7 +424,7 @@ enum CreativeLoftBuilder {
 
     // MARK: - Plants and extras
 
-    static func buildPlants(_ b: Batches) {
+    static func buildPlants(_ b: Batches<LoftMaterial>) {
         let x: Float = 1.7, z: Float = -1.2
         b.add(.ceramicCream, .generateCylinder(height: 0.32, radius: 0.17), at: [x, 0.16, z])
         b.add(.ceramicCream, .generateCone(height: 0.05, radius: 0.19), at: [x, 0.345, z], rotation: simd_quatf(angle: .pi, axis: [1, 0, 0]))
@@ -469,52 +469,33 @@ enum LoftMaterial: Hashable {
     case paint(String)
 }
 
-/// Collects meshes per material, then makes one entity per material.
-@MainActor
-final class Batches {
-    private let materials: CreativeLoftMaterials
-    private var batches: [LoftMaterial: MeshBatch] = [:]
-    private var order: [LoftMaterial] = []
-
-    init(_ materials: CreativeLoftMaterials) {
-        self.materials = materials
+extension Batches where Key == LoftMaterial {
+    convenience init(_ materials: CreativeLoftMaterials) {
+        self.init { key in materials.material(key) }
     }
+}
 
-    func add(_ material: LoftMaterial, _ mesh: LoftGeometry, at position: SIMD3<Float>,
-             rotation: simd_quatf = simd_quatf(angle: 0, axis: [0, 1, 0]), scale: SIMD3<Float> = .one) {
-        if batches[material] == nil { order.append(material) }
-        batches[material, default: MeshBatch()].add(mesh, at: position, rotation: rotation, scale: scale)
-    }
-
-    func flush(into parent: Entity) {
-        for key in order {
-            guard let batch = batches[key], let entity = batch.entity(material(key)) else { continue }
-            parent.addChild(entity)
-        }
-        batches = [:]
-        order = []
-    }
-
-    private func material(_ key: LoftMaterial) -> any RealityKit.Material {
+extension CreativeLoftMaterials {
+    func material(_ key: LoftMaterial) -> any RealityKit.Material {
         switch key {
-        case .wallBlush: return materials.wallBlush
-        case .wallRose: return materials.wallRose
-        case .floor: return materials.floor
-        case .wood: return materials.wood
-        case .brass: return materials.brass
-        case .cream: return materials.cream
-        case .velvet: return materials.velvet
-        case .glass: return materials.glass
-        case .leafLight: return materials.leafLight
-        case .leafDark: return materials.leafDark
-        case .ceramicCream: return materials.ceramicCream
-        case .ceramicRose: return materials.ceramicRose
-        case .neon: return materials.neon
-        case .bulb: return materials.bulb
-        case .berry: return materials.berry
-        case .mauveDark: return materials.mauveDark
-        case .sky: return materials.sky
-        case .paint(let hex): return materials.paint(hex)
+        case .wallBlush: return wallBlush
+        case .wallRose: return wallRose
+        case .floor: return floor
+        case .wood: return wood
+        case .brass: return brass
+        case .cream: return cream
+        case .velvet: return velvet
+        case .glass: return glass
+        case .leafLight: return leafLight
+        case .leafDark: return leafDark
+        case .ceramicCream: return ceramicCream
+        case .ceramicRose: return ceramicRose
+        case .neon: return neon
+        case .bulb: return bulb
+        case .berry: return berry
+        case .mauveDark: return mauveDark
+        case .sky: return sky
+        case .paint(let hex): return paint(hex)
         }
     }
 }

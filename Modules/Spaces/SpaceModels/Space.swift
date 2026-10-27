@@ -128,6 +128,8 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
     case monitor, terminal, bookshelf, clock, cube, lamp, poster
     /// Stage 09 (Creative Studio loft). Stored as text, so older rows are unaffected.
     case easel, neon, mug
+    /// Stage 09 (Study Library reading room).
+    case globe, chalkboard, book
 
     public var title: String {
         switch self {
@@ -141,6 +143,9 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
         case .easel: return "Easel"
         case .neon: return "Neon Sign"
         case .mug: return "Mug"
+        case .globe: return "Globe"
+        case .chalkboard: return "Chalkboard"
+        case .book: return "Book"
         }
     }
 
@@ -156,6 +161,9 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
         case .easel: return "paintbrush.pointed"
         case .neon: return "heart"
         case .mug: return "mug"
+        case .globe: return "globe.americas"
+        case .chalkboard: return "rectangle.and.pencil.and.ellipsis"
+        case .book: return "book"
         }
     }
 }

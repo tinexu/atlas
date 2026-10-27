@@ -1,10 +1,8 @@
 import AtlasCore
 import Foundation
 
-/// The interactive props of the Creative Studio loft, and which stored
-/// `SpaceObject` drives each one. The loft places props itself, so an
-/// object's stored position doesn't matter here; its kind and its action do.
-public enum CreativeLoftRole: String, CaseIterable, Sendable {
+/// The interactive props of the Creative Studio loft.
+public enum CreativeLoftRole: String, DioramaRole {
     case monitor, easel, shelves, pegboard, neon, mug, pouf, pendant
 
     /// The object kind that plays this role.
@@ -43,31 +41,10 @@ public enum CreativeLoft {
     /// Placeholder until you set your own (edit the pegboard object).
     public static let inspirationURL = "https://www.pinterest.com/"
 
-    public struct Assignment: Equatable, Sendable {
-        /// The object behind each prop.
-        public var roles: [CreativeLoftRole: SpaceObject] = [:]
-        /// Extra objects that do something: drawn as ordinary objects where they're stored.
-        public var loose: [SpaceObject] = []
-        /// Extra objects that do nothing (e.g. a second plain poster): not drawn.
-        public var hidden: [SpaceObject] = []
-    }
+    public typealias Assignment = DioramaAssignment<CreativeLoftRole>
 
-    /// Gives each role one object of its kind, preferring objects that run
-    /// something, so existing assignments always keep a visible prop.
     public static func assign(_ objects: [SpaceObject]) -> Assignment {
-        var result = Assignment()
-        var used = Set<UUID>()
-        for role in CreativeLoftRole.allCases {
-            let candidates = objects.filter { $0.kind == role.kind && !used.contains($0.id) }
-            if let chosen = candidates.first(where: \.hasAssignment) ?? candidates.first {
-                result.roles[role] = chosen
-                used.insert(chosen.id)
-            }
-        }
-        for object in objects where !used.contains(object.id) {
-            if object.hasAssignment { result.loose.append(object) } else { result.hidden.append(object) }
-        }
-        return result
+        Diorama.assign(objects)
     }
 
     /// Figma if it's installed, otherwise Preview.
@@ -76,22 +53,17 @@ public enum CreativeLoft {
         return figma.contains(where: fileManager.fileExists(atPath:)) ? "com.figma.Desktop" : "com.apple.Preview"
     }
 
-    /// Default objects for roles the Space doesn't have yet. Never replaces
-    /// or edits an existing object.
+    /// What to save so the loft's props have their default actions (see
+    /// `Diorama.defaults`): an existing action is never replaced.
     public static func missingDefaults(for spaceID: UUID, existing: [SpaceObject], activationWorkflowID: UUID?,
                                        designApp: String, hasFocusAction: Bool) -> [SpaceObject] {
-        let kinds = Set(existing.map(\.kind))
-        return CreativeLoftRole.withDefaults.filter { !kinds.contains($0.kind) }.map { role in
-            var object = SpaceObject(spaceID: spaceID, kind: role.kind, label: role.defaultLabel,
-                                     transform: SpaceTransform(position: blueprintPosition(role)))
+        Diorama.defaults(for: spaceID, existing: existing, roles: CreativeLoftRole.withDefaults,
+                         position: blueprintPosition) { role, object in
             switch role {
             case .monitor:
                 object.actionID = LaunchApplicationAction.id
                 object.parameters = ["bundleId": .string(designApp)]
-            case .easel:
-                object.actionID = OpenFileAction.id
-                object.parameters = ["path": "~/Pictures"]
-            case .shelves:
+            case .easel, .shelves:
                 object.actionID = OpenFileAction.id
                 object.parameters = ["path": "~/Pictures"]
             case .pegboard:
@@ -107,7 +79,6 @@ public enum CreativeLoft {
             case .pouf, .pendant:
                 break
             }
-            return object
         }
     }
 
@@ -128,25 +99,14 @@ public enum CreativeLoft {
 }
 
 extension SpaceLibrary {
-    /// Adds the loft's new props, with their default actions, to Creative
+    /// Adds the loft's props, with their default actions, to Creative
     /// Studio Spaces made before the redesign. Runs once per Space; objects
-    /// you already have (and their actions) are left exactly as they are.
+    /// that already run something are left exactly as they are.
     public func upgradeCreativeStudios() throws {
-        for space in try store.spaces() where space.templateID == CreativeLoft.templateID {
-            let key = "spaces.creativeLoft.v1.\(space.id.uuidString)"
-            guard try store.preference(key, as: Bool.self) != true else { continue }
-            let existing = try store.spaceObjects(spaceID: space.id)
-            let profiles = try store.profiles(spaceID: space.id)
-            let activation = (profiles.first(where: \.isDefault) ?? profiles.first)?.workflowID
-            let additions = CreativeLoft.missingDefaults(
-                for: space.id, existing: existing, activationWorkflowID: activation,
-                designApp: CreativeLoft.designAppBundleID(),
-                hasFocusAction: core.registry.descriptor(for: "timer.focus.start") != nil
-            )
-            try store.database.transaction {
-                for object in additions { try store.saveSpaceObject(object) }
-                try store.setPreference(true, for: key)
-            }
+        let hasFocusAction = self.hasFocusAction
+        try upgradeDiorama(templateID: CreativeLoft.templateID, key: "spaces.creativeLoft.v1") { space, existing, activation in
+            CreativeLoft.missingDefaults(for: space.id, existing: existing, activationWorkflowID: activation,
+                                         designApp: CreativeLoft.designAppBundleID(), hasFocusAction: hasFocusAction)
         }
     }
 }
