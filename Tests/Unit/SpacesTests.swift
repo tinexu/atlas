@@ -276,7 +276,10 @@ final class SpaceTemplateTests: XCTestCase {
     }
 
     func testEveryTemplateWorkflowPassesValidation() throws {
-        let registry = ActionRegistry.standard()
+        // With Time Architect running, as in the app: the Creative Studio's
+        // mug starts a focus session.
+        let time = try TimeHarness()
+        let registry = time.core.registry
         for template in SpaceTemplates.all {
             XCTAssertFalse(template.profiles.isEmpty, template.name)
             XCTAssertEqual(template.profiles.filter(\.isDefault).count, 1, "\(template.name) needs one default profile")

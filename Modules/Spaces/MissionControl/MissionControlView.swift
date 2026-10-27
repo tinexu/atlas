@@ -20,6 +20,7 @@ public struct MissionControlView: View {
     @State private var scene = MissionControlScene()
     @State private var isWindowVisible = true
     @State private var isHovering = false
+    @State private var hoverLabel: (text: String, point: CGPoint)?
     @State private var lastDrag: CGSize = .zero
     @State private var lastMagnification: CGFloat = 1
     @State private var scrollMonitor: Any?
@@ -69,20 +70,56 @@ public struct MissionControlView: View {
     }
 
     private var world: some View {
-        RealityView { content in
-            content.camera = .virtual
-            // After a pause the old view may still hold the scene; take it back first.
-            scene.root.removeFromParent()
-            content.add(scene.root)
-        } update: { _ in
-            scene.sync(rooms: rooms, selection: selection, reduceMotion: reduceMotion)
+        GeometryReader { proxy in
+            RealityView { content in
+                content.camera = .virtual
+                // After a pause the old view may still hold the scene; take it back first.
+                scene.root.removeFromParent()
+                content.add(scene.root)
+            } update: { _ in
+                scene.sync(rooms: rooms, selection: selection, reduceMotion: reduceMotion)
+            }
+            .gesture(taps)
+            .simultaneousGesture(orbitDrag)
+            .simultaneousGesture(pinch)
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let point):
+                    hover(at: point, in: proxy.size)
+                case .ended:
+                    hover(at: nil, in: proxy.size)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let hoverLabel {
+                    Text(hoverLabel.text)
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.regularMaterial, in: Capsule())
+                        .fixedSize()
+                        .position(x: hoverLabel.point.x, y: max(12, hoverLabel.point.y - 22))
+                        .allowsHitTesting(false)
+                }
+            }
         }
-        .gesture(taps)
-        .simultaneousGesture(orbitDrag)
-        .simultaneousGesture(pinch)
         .onHover { isHovering = $0 }
         .onAppear(perform: installScrollMonitor)
         .onDisappear(perform: removeScrollMonitor)
+    }
+
+    /// Lifts and outlines the object under the pointer and names it.
+    private func hover(at point: CGPoint?, in size: CGSize) {
+        guard let point, lastDrag == .zero,
+              let hit = scene.hover(at: point, in: size, reduceMotion: reduceMotion),
+              let object = rooms.first(where: { $0.id == hit.room })?.objects.first(where: { $0.id == hit.object })
+        else {
+            _ = scene.hover(at: nil, in: size, reduceMotion: reduceMotion)
+            hoverLabel = nil
+            return
+        }
+        let text = object.label.flatMap { $0.isEmpty ? nil : $0 } ?? object.kind.title
+        hoverLabel = (text, point)
     }
 
     // MARK: - Gestures

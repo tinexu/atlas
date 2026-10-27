@@ -120,24 +120,30 @@ public enum SpaceTemplates {
         )
     }
 
+    /// A sunlit pink artist's loft (Stage 09). The loft is drawn by
+    /// `CreativeLoftBuilder` (AtlasSpacesUI); these objects drive its props.
     public static var creativeStudio: SpaceTemplate {
-        SpaceTemplate(
-            id: "creative-studio",
+        func object(_ role: CreativeLoftRole, _ action: ActionID?, _ parameters: ActionParameters = [:]) -> SpaceObjectBlueprint {
+            SpaceObjectBlueprint(role.kind, label: role.defaultLabel, at: CreativeLoft.blueprintPosition(role),
+                                 action: action, parameters)
+        }
+        return SpaceTemplate(
+            id: CreativeLoft.templateID,
             name: "Creative Studio",
-            summary: "Music for focus, Notes for ideas and your Pictures folder.",
+            summary: "A sunlit pink loft: your design app, project and assets folders, inspiration and a focus mug.",
             symbolName: "paintpalette",
             group: .creative,
-            room: RoomLayout(floorColor: "#E7E2DA", wallColor: "#FAF7F2", accentColor: "#EC4899", lighting: .studio),
+            room: RoomLayout(floorColor: "#F3E1DC", wallColor: "#F6D6DC", accentColor: "#E8A6B4", lighting: .warm),
             objects: [
-                SpaceObjectBlueprint(.poster, label: "Pictures", at: [-0.3, 0.6, -0.97],
-                                     action: RevealInFinderAction.id, ["path": "~/Pictures"]),
-                SpaceObjectBlueprint(.poster, at: [0.4, 0.55, -0.97], scale: [0.8, 0.8, 1]),
-                SpaceObjectBlueprint(.monitor, label: "Notes", at: [0.45, 0, -0.35], yaw: -20,
-                                     action: LaunchApplicationAction.id, ["bundleId": .string(App.notes)]),
-                SpaceObjectBlueprint(.cube, label: "Music", at: [-0.45, 0, 0.2], yaw: 15,
-                                     action: LaunchApplicationAction.id, ["bundleId": .string(App.music)]),
-                SpaceObjectBlueprint(.cube, at: [-0.2, 0, 0.45], yaw: -30, scale: [0.6, 0.6, 0.6]),
-                SpaceObjectBlueprint(.lamp, at: [0.75, 0, 0.3]),
+                object(.monitor, LaunchApplicationAction.id, ["bundleId": .string(CreativeLoft.designAppBundleID())]),
+                object(.easel, OpenFileAction.id, ["path": "~/Pictures"]),
+                object(.shelves, OpenFileAction.id, ["path": "~/Pictures"]),
+                object(.pegboard, OpenURLAction.id, ["url": .string(CreativeLoft.inspirationURL)]),
+                object(.mug, "timer.focus.start", ["minutes": 25]),
+                object(.pouf, LaunchApplicationAction.id, ["bundleId": .string(App.music)]),
+                object(.pendant, nil),
+                // The neon sign runs this Space's activation; it's added with
+                // the new Space's workflow by `upgradeCreativeStudios()`.
             ],
             profiles: [
                 ProfileBlueprint(

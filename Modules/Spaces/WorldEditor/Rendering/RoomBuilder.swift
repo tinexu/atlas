@@ -11,14 +11,33 @@ import RealityKit
 /// `selection` and `active` are toggled without rebuilding the room.
 @MainActor
 public enum RoomBuilder {
-    public static let floorSize: Float = 2
-    public static let wallHeight: Float = 1.15
+    nonisolated public static let floorSize: Float = 2
+    nonisolated public static let wallHeight: Float = 1.15
     static let wallThickness: Float = 0.06
 
     public static func roomName(_ id: UUID) -> String { "room:\(id.uuidString)" }
     public static func objectName(_ id: UUID) -> String { "object:\(id.uuidString)" }
 
-    public static func build(space: Space, room: RoomLayout, objects: [SpaceObject]) -> Entity {
+    /// The rectangle a room stands on, in room units (floor centred on x).
+    struct Footprint {
+        var width: Float = floorSize
+        var depth: Float = floorSize
+        var centerZ: Float = 0
+        var wallHeight: Float = RoomBuilder.wallHeight
+
+        var back: Float { centerZ - depth / 2 }
+        var front: Float { centerZ + depth / 2 }
+        static let standard = Footprint()
+        static let loft = Footprint(depth: 1.5, centerZ: -0.25, wallHeight: 1.3)
+    }
+
+    /// `detail: false` asks for a lighter room where the template has one
+    /// (the Creative Studio loft's miniature); other rooms ignore it.
+    public static func build(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool = true,
+                             reduceMotion: Bool = false) -> Entity {
+        if space.templateID == CreativeLoft.templateID {
+            return buildLoft(space: space, room: room, objects: objects, detail: detail, reduceMotion: reduceMotion)
+        }
         let accent = NSColor(atlasHex: space.accentColor)
         let style = AssetStyle(accent: accent, glow: NSColor(atlasHex: room.lighting.glowColor), tint: room.lighting.tint)
         let half = floorSize / 2
@@ -43,47 +62,74 @@ public enum RoomBuilder {
         strip.position = [0, 0.03, -half + 0.005]
         root.addChild(strip)
 
-        // Name plate leaning toward the camera in front of the room.
-        root.addChild(namePlate(space.name, color: .white))
+        addChrome(to: root, name: space.name, accent: accent, footprint: .standard)
 
-        // Selection ring: a slightly larger translucent plate under the floor.
+        for object in objects {
+            root.addChild(objectEntity(object, style: style))
+        }
+        return root
+    }
+
+    /// The Creative Studio: the loft draws its own shell and props, which
+    /// stand in for the Space's objects by role. Objects with an action but
+    /// no prop are drawn as usual where they're stored.
+    static func buildLoft(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool, reduceMotion: Bool) -> Entity {
+        let accent = NSColor(atlasHex: space.accentColor)
+        let style = AssetStyle(accent: accent, glow: NSColor(atlasHex: room.lighting.glowColor), tint: room.lighting.tint)
+        let root = Entity()
+        root.name = roomName(space.id)
+
+        let loft = CreativeLoftBuilder.build(objects: objects, detail: detail)
+        root.addChild(loft.entity)
+        root.components.set(CreativeLoftMotionComponent(motion: CreativeLoftMotion(parts: loft.parts, reduceMotion: reduceMotion)))
+        addChrome(to: root, name: space.name, accent: accent, footprint: .loft)
+
+        if detail {
+            for object in CreativeLoft.assign(objects).loose {
+                root.addChild(objectEntity(object, style: style))
+            }
+        }
+        return root
+    }
+
+    /// Name plate, selection ring, active edge, status light and the
+    /// room's own picking shapes, sized to `footprint`.
+    static func addChrome(to root: Entity, name: String, accent: NSColor, footprint f: Footprint) {
+        root.addChild(namePlate(name, color: .white, z: f.front + 0.3))
+
         let selection = ModelEntity(
-            mesh: .generatePlane(width: floorSize + 0.3, depth: floorSize + 0.3, cornerRadius: 0.12),
+            mesh: .generatePlane(width: f.width + 0.3, depth: f.depth + 0.3, cornerRadius: 0.12),
             materials: [translucent(.white, opacity: 0.55)]
         )
         selection.name = "selection"
-        selection.position = [0, -0.085, 0]
+        selection.position = [0, -0.085, f.centerZ]
         selection.isEnabled = false
         root.addChild(selection)
 
         // Glowing edge along the open front when this is the active Space.
-        let active = ModelEntity(mesh: .generateBox(size: [floorSize, 0.03, 0.05]), materials: [UnlitMaterial(color: accent)])
+        let active = ModelEntity(mesh: .generateBox(size: [f.width, 0.03, 0.05]), materials: [UnlitMaterial(color: accent)])
         active.name = "active"
-        active.position = [0, 0.005, half - 0.02]
+        active.position = [0, 0.005, f.front - 0.02]
         active.isEnabled = false
         root.addChild(active)
 
         // Status light above the back corner.
         let status = ModelEntity(mesh: .generateSphere(radius: 0.08), materials: [UnlitMaterial(color: .gray)])
         status.name = "status"
-        status.position = [-half + 0.15, wallHeight + 0.2, -half + 0.15]
+        status.position = [-f.width / 2 + 0.15, f.wallHeight + 0.2, f.back + 0.15]
         root.addChild(status)
-
-        for object in objects {
-            root.addChild(objectEntity(object, style: style))
-        }
 
         // Picking: floor and walls select the room. Objects carry their own
         // shapes and sit in front of these, so a click on one hits it first.
+        let halfWidth = f.width / 2
         root.components.set(CollisionComponent(shapes: [
-            ShapeResource.generateBox(size: [floorSize, 0.1, floorSize]).offsetBy(translation: [0, -0.04, 0]),
-            ShapeResource.generateBox(size: [floorSize, wallHeight, wallThickness])
-                .offsetBy(translation: [0, wallHeight / 2, -half - wallThickness / 2]),
-            ShapeResource.generateBox(size: [wallThickness, wallHeight, floorSize])
-                .offsetBy(translation: [-half - wallThickness / 2, wallHeight / 2, 0]),
+            ShapeResource.generateBox(size: [f.width, 0.1, f.depth]).offsetBy(translation: [0, -0.04, f.centerZ]),
+            ShapeResource.generateBox(size: [f.width, f.wallHeight, wallThickness])
+                .offsetBy(translation: [0, f.wallHeight / 2, f.back - wallThickness / 2]),
+            ShapeResource.generateBox(size: [wallThickness, f.wallHeight, f.depth])
+                .offsetBy(translation: [-halfWidth - wallThickness / 2, f.wallHeight / 2, f.centerZ]),
         ]))
         root.components.set(InputTargetComponent())
-        return root
     }
 
     static func objectEntity(_ object: SpaceObject, style: AssetStyle) -> Entity {
@@ -100,14 +146,54 @@ public enum RoomBuilder {
         let model = AssetCatalog.asset(for: object.kind).makeEntity(style: style)
         container.addChild(model)
 
-        let bounds = model.visualBounds(relativeTo: container)
-        if !bounds.isEmpty {
-            container.components.set(CollisionComponent(shapes: [
-                ShapeResource.generateBox(size: bounds.extents + 0.02).offsetBy(translation: bounds.center),
-            ]))
-            container.components.set(InputTargetComponent())
-        }
+        makeInteractive(container)
         return container
+    }
+
+    /// Gives an object's entity a pick shape around everything it draws.
+    static func makeInteractive(_ container: Entity) {
+        let bounds = container.visualBounds(relativeTo: container)
+        guard !bounds.isEmpty else { return }
+        container.components.set(CollisionComponent(shapes: [
+            ShapeResource.generateBox(size: bounds.extents + 0.02).offsetBy(translation: bounds.center),
+        ]))
+        container.components.set(InputTargetComponent())
+    }
+
+    // MARK: - Hover
+
+    struct HoverComponent: Component {
+        var rest: SIMD3<Float>
+    }
+
+    /// Lifts an object 1 cm and draws a rose outline around it, or puts it
+    /// back. The outline is made on first hover, so rooms don't pay for it.
+    /// Under Reduce Motion it only glows.
+    public static func setHovered(_ object: Entity, _ hovered: Bool, lift: Bool = true) {
+        let rest = object.components[HoverComponent.self]?.rest ?? object.position
+        object.components.set(HoverComponent(rest: rest))
+        object.position = hovered && lift ? rest + [0, 0.01, 0] : rest
+        if hovered, object.findEntity(named: "hoverGlow") == nil, let glow = outline(of: object) {
+            object.addChild(glow)
+        }
+        object.findEntity(named: "hoverGlow")?.isEnabled = hovered
+    }
+
+    /// A slightly inflated copy of everything `object` draws, showing only
+    /// its back faces: reads as a soft outline.
+    static func outline(of object: Entity) -> Entity? {
+        var batch = MeshBatch()
+        func collect(_ entity: Entity) {
+            if let model = entity as? ModelEntity, let mesh = model.model?.mesh {
+                batch.add(LoftGeometry(mesh), matrix: entity.transformMatrix(relativeTo: object), inflate: 0.008)
+            }
+            entity.children.forEach(collect)
+        }
+        object.children.forEach(collect)
+        var material = UnlitMaterial(color: NSColor(atlasHex: CreativeLoftPalette.current.rose))
+        material.blending = .transparent(opacity: 0.6)
+        material.faceCulling = .front
+        return batch.entity(material, name: "hoverGlow")
     }
 
     /// Updates the cheap per-frame-independent indicators without rebuilding.
@@ -119,7 +205,7 @@ public enum RoomBuilder {
         room.findEntity(named: "active")?.isEnabled = isActive
     }
 
-    static func namePlate(_ text: String, color: NSColor) -> Entity {
+    static func namePlate(_ text: String, color: NSColor, z: Float = floorSize / 2 + 0.3) -> Entity {
         let mesh = MeshResource.generateText(
             text,
             extrusionDepth: 0.005,
@@ -132,7 +218,7 @@ public enum RoomBuilder {
         let bounds = mesh.bounds
         // Centre horizontally and lay it back so it reads from above.
         let holder = Entity()
-        holder.position = [0, 0.01, floorSize / 2 + 0.3]
+        holder.position = [0, 0.01, z]
         holder.orientation = simd_quatf(angle: -.pi / 3, axis: [1, 0, 0])
         label.position = [-bounds.center.x, -bounds.min.y, 0]
         holder.addChild(label)

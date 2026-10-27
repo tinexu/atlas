@@ -107,7 +107,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AtlasCoreTests",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit", "AtlasCompanion"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasOrbit", "AtlasCompanion"],
             // Unit tests and cross-module integration tests share the mocks.
             path: "Tests",
             sources: ["Unit", "Integration"]

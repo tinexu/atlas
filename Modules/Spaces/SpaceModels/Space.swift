@@ -126,6 +126,8 @@ public struct ActivationProfile: Identifiable, Hashable, Codable, Sendable {
 
 public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
     case monitor, terminal, bookshelf, clock, cube, lamp, poster
+    /// Stage 09 (Creative Studio loft). Stored as text, so older rows are unaffected.
+    case easel, neon, mug
 
     public var title: String {
         switch self {
@@ -136,6 +138,9 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
         case .cube: return "Cube"
         case .lamp: return "Lamp"
         case .poster: return "Poster"
+        case .easel: return "Easel"
+        case .neon: return "Neon Sign"
+        case .mug: return "Mug"
         }
     }
 
@@ -148,6 +153,9 @@ public enum SpaceObjectKind: String, Codable, CaseIterable, Sendable {
         case .cube: return "cube"
         case .lamp: return "lamp.desk"
         case .poster: return "photo.artframe"
+        case .easel: return "paintbrush.pointed"
+        case .neon: return "heart"
+        case .mug: return "mug"
         }
     }
 }

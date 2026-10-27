@@ -15,7 +15,16 @@ final class MissionControlScene {
 
     private(set) var orbit = OrbitCamera(target: .zero, yaw: 0, pitch: 0.62, distance: 10)
     private var home = OrbitCamera(target: .zero, yaw: 0, pitch: 0.62, distance: 10)
-    private var rooms: [UUID: (geometry: RoomSnapshot.Geometry, entity: Entity)] = [:]
+    /// What a room was built from; a change rebuilds it.
+    private struct BuildKey: Equatable {
+        var geometry: RoomSnapshot.Geometry
+        var detail: Bool
+        var reduceMotion: Bool
+    }
+
+    private var rooms: [UUID: (key: BuildKey, entity: Entity)] = [:]
+    private var activeRooms: Set<UUID> = []
+    private var hovered: Entity?
     private var positions: [UUID: SIMD3<Float>] = [:]
     private var rowSignature: [String] = []
     private var cameraAnimation: AnimationPlaybackController?
@@ -23,6 +32,8 @@ final class MissionControlScene {
     private var hasFramedWorld = false
 
     init() {
+        CreativeLoftMotionComponent.registerComponent()
+        RoomBuilder.HoverComponent.registerComponent()
         camera.camera.fieldOfViewInDegrees = 45
         root.addChild(camera)
         root.addChild(world)
@@ -57,14 +68,35 @@ final class MissionControlScene {
         }
 
         for snapshot in snapshots {
+            // The loft is detailed only when selected (and the camera is close);
+            // other rooms have a single level of detail.
+            let isLoft = snapshot.space.templateID == CreativeLoft.templateID
+            let key = BuildKey(geometry: snapshot.geometry, detail: !isLoft || snapshot.id == selection,
+                               reduceMotion: isLoft && reduceMotion)
             let entity: Entity
-            if let existing = rooms[snapshot.id], existing.geometry == snapshot.geometry {
+            if let existing = rooms[snapshot.id], existing.key == key {
                 entity = existing.entity
             } else {
-                rooms[snapshot.id]?.entity.removeFromParent()
-                entity = RoomBuilder.build(space: snapshot.space, room: snapshot.room, objects: snapshot.objects)
+                if let old = rooms[snapshot.id]?.entity {
+                    old.components[CreativeLoftMotionComponent.self]?.motion.stop()
+                    old.removeFromParent()
+                    if let hovered, sequence(first: hovered, next: \.parent).contains(where: { $0 === old }) { self.hovered = nil }
+                }
+                entity = RoomBuilder.build(space: snapshot.space, room: snapshot.room, objects: snapshot.objects,
+                                           detail: key.detail, reduceMotion: reduceMotion)
                 world.addChild(entity)
-                rooms[snapshot.id] = (snapshot.geometry, entity)
+                entity.components[CreativeLoftMotionComponent.self]?.motion.start()
+                rooms[snapshot.id] = (key, entity)
+            }
+            if snapshot.isActive, !activeRooms.contains(snapshot.id) {
+                // Only a change celebrates, not a room that was already active.
+                if hasFramedWorld {
+                    entity.components[CreativeLoftMotionComponent.self]?.motion
+                        .celebrate(baseIntensity: CreativeLoftPalette.current.pendantIntensity)
+                }
+                activeRooms.insert(snapshot.id)
+            } else if !snapshot.isActive {
+                activeRooms.remove(snapshot.id)
             }
             if let position = layout.positions[snapshot.id], entity.position != position {
                 entity.position = position
@@ -77,6 +109,7 @@ final class MissionControlScene {
             )
         }
         positions = layout.positions
+        activeRooms.formIntersection(present)
 
         let signature = layout.rows.map { "\($0.group.rawValue)@\($0.z),\($0.labelX)" }
         if signature != rowSignature {
@@ -154,6 +187,50 @@ final class MissionControlScene {
                 if let objectID { return .object(objectID, room: roomID) }
                 return .room(roomID)
             }
+            current = node.parent
+        }
+        return nil
+    }
+
+    /// Highlights the object under the pointer (`point` in view coordinates,
+    /// nil when the pointer leaves) and returns it. Rays are cast from the
+    /// camera by hand, since RealityView on macOS has no hit test.
+    func hover(at point: CGPoint?, in size: CGSize, reduceMotion: Bool) -> (object: UUID, room: UUID)? {
+        var target: Entity?
+        var result: (UUID, UUID)?
+        if let point, size.width > 0, size.height > 0, let scene = root.scene {
+            let tanHalf = tan(camera.camera.fieldOfViewInDegrees * .pi / 360)
+            let aspect = Float(size.width / size.height)
+            let local = SIMD3<Float>(
+                (2 * Float(point.x / size.width) - 1) * tanHalf * aspect,
+                (1 - 2 * Float(point.y / size.height)) * tanHalf,
+                -1
+            )
+            let matrix = camera.transformMatrix(relativeTo: nil)
+            let direction = simd_normalize(SIMD3(
+                simd_dot(SIMD3(matrix.columns.0.x, matrix.columns.1.x, matrix.columns.2.x), local),
+                simd_dot(SIMD3(matrix.columns.0.y, matrix.columns.1.y, matrix.columns.2.y), local),
+                simd_dot(SIMD3(matrix.columns.0.z, matrix.columns.1.z, matrix.columns.2.z), local)
+            ))
+            let origin = SIMD3(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
+            if let entity = scene.raycast(origin: origin, direction: direction, length: 200, query: .nearest).first?.entity,
+               case .object(let objectID, let roomID) = hit(for: entity) {
+                target = objectContainer(entity)
+                result = (objectID, roomID)
+            }
+        }
+        if target !== hovered {
+            if let hovered { RoomBuilder.setHovered(hovered, false) }
+            if let target { RoomBuilder.setHovered(target, true, lift: !reduceMotion) }
+            hovered = target
+        }
+        return result
+    }
+
+    private func objectContainer(_ entity: Entity) -> Entity? {
+        var current: Entity? = entity
+        while let node = current {
+            if node.name.hasPrefix("object:") { return node }
             current = node.parent
         }
         return nil

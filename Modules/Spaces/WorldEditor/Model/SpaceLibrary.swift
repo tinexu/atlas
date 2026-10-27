@@ -29,8 +29,8 @@ extension Array where Element == Space {
 /// Creates, edits and removes Spaces. Workflows are saved through
 /// `AtlasCore.save(_:)` so they show up under Automations like any other.
 public final class SpaceLibrary: @unchecked Sendable {
-    private let core: AtlasCore
-    private var store: AtlasStore { core.store }
+    let core: AtlasCore
+    var store: AtlasStore { core.store }
 
     public init(core: AtlasCore) {
         self.core = core
@@ -74,6 +74,7 @@ public final class SpaceLibrary: @unchecked Sendable {
             }
         }
         announce(AtlasEvent.Name.spaceSaved, space.id)
+        if template.id == CreativeLoft.templateID { try upgradeCreativeStudios() }
         return space
     }
 

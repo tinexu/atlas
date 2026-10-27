@@ -80,6 +80,9 @@ public struct PrimitiveAsset: TemplateAsset {
         case .cube: buildCube(into: root, style: style)
         case .lamp: buildLamp(into: root, style: style)
         case .poster: buildPoster(into: root, style: style)
+        case .easel: buildEasel(into: root, style: style)
+        case .neon: buildNeon(into: root, style: style)
+        case .mug: buildMug(into: root, style: style)
         }
         return root
     }
@@ -165,6 +168,32 @@ public struct PrimitiveAsset: TemplateAsset {
         root.addChild(part(.generateBox(size: [0.5, 0.36, 0.015]), style.matte("#F8F5EE"), at: [0, 0, 0]))
         root.addChild(part(.generatePlane(width: 0.42, height: 0.28), style.matte(style.accent), at: [0, 0, 0.009]))
         root.addChild(part(.generateSphere(radius: 0.05), style.matte(NSColor(atlasHex: "#FDE68A")), at: [0.1, 0.05, 0.012]))
+    }
+
+    private func buildEasel(into root: Entity, style: AssetStyle) {
+        let wood = style.matte("#C8A27A")
+        for (x, tilt) in [(Float(-0.12), Float(0.12)), (0.12, -0.12)] {
+            let leg = part(.generateCylinder(height: 0.8, radius: 0.012), wood, at: [x, 0.4, 0])
+            leg.orientation = simd_quatf(angle: tilt, axis: [0, 0, 1])
+            root.addChild(leg)
+        }
+        root.addChild(part(.generateBox(size: [0.36, 0.44, 0.02], cornerRadius: 0.01), style.matte("#FFF4EC"), at: [0, 0.52, 0.03]))
+        root.addChild(part(.generateSphere(radius: 0.06), style.matte(style.accent), at: [0.05, 0.55, 0.045]))
+    }
+
+    private func buildNeon(into root: Entity, style: AssetStyle) {
+        // A small glowing heart outline on the wall, facing +z.
+        let glow = style.glowing(style.accent)
+        for index in 0..<16 {
+            let t = Float(index) / 16 * 2 * .pi
+            let x = 16 * pow(sin(t), 3), y = 13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t)
+            root.addChild(part(.generateSphere(radius: 0.012), glow, at: [x * 0.008, y * 0.008, 0]))
+        }
+    }
+
+    private func buildMug(into root: Entity, style: AssetStyle) {
+        root.addChild(part(.generateCylinder(height: 0.1, radius: 0.045), style.matte(style.accent), at: [0, 0.05, 0]))
+        root.addChild(part(.generateBox(size: [0.02, 0.05, 0.015], cornerRadius: 0.006), style.matte(style.accent), at: [0.055, 0.05, 0]))
     }
 
     private func part(_ mesh: MeshResource, _ material: some RealityKit.Material, at position: SIMD3<Float>) -> ModelEntity {

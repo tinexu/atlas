@@ -74,6 +74,8 @@ final class SpacesModel: ObservableObject {
         do {
             let module = try SpacesModule(core: core)
             try module.library.seedStarterSpacesIfNeeded()
+            // Gives Creative Studios made before the loft its new props (once).
+            try module.library.upgradeCreativeStudios()
             self.module = module
         } catch {
             module = nil
