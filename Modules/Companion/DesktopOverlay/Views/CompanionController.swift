@@ -56,6 +56,8 @@ public final class CompanionController: ObservableObject {
     @Published public var paletteVisible = false
     /// The running focus session, for the countdown under the character.
     @Published public private(set) var focusSession: FocusSession?
+    /// When the running lockdown ends, for the countdown under the pomodoro one.
+    @Published public private(set) var lockdownEndsAt: Date?
 
     public let core: AtlasCore
     public let runner: CommandRunner
@@ -104,6 +106,7 @@ public final class CompanionController: ObservableObject {
         }
         applySources()
         focusSession = core.time?.focus.session
+        lockdownEndsAt = core.time?.lockdown.session?.endsAt
         Task.detached(priority: .utility) { [weak self] in
             let apps = InstalledApps.scan()
             await self?.received(apps)
@@ -210,6 +213,8 @@ public final class CompanionController: ObservableObject {
             showResult(of: event)
         case AtlasEvent.Name.actionEffect where event.payload["kind"]?.stringValue == "app":
             if let bundleID = event.payload["value"]?.stringValue { atlasLaunches[bundleID] = Date() }
+        case _ where event.name.hasPrefix("lockdown."):
+            lockdownEndsAt = core.time?.lockdown.session?.endsAt
         case _ where event.name.hasPrefix("focus."):
             focusSession = core.time?.focus.session
             updateFocus()

@@ -170,19 +170,31 @@ struct CompanionOverlayView: View {
                     .contextMenu { QuickMenuSwiftUI(controller: controller) }
             }
             .overlay(alignment: .bottom) {
-                if let session = controller.focusSession {
-                    Group {
-                        if session.state == .running {
-                            Text(timerInterval: Date()...session.endsAt(from: Date()), countsDown: true)
-                        } else {
-                            Text("Paused")
+                VStack(spacing: 2) {
+                    if let session = controller.focusSession {
+                        Group {
+                            if session.state == .running {
+                                Text(timerInterval: Date()...session.endsAt(from: Date()), countsDown: true)
+                            } else {
+                                Text("Paused")
+                            }
                         }
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.regularMaterial, in: Capsule())
                     }
-                    .font(.caption2.monospacedDigit().weight(.semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.regularMaterial, in: Capsule())
-                    .allowsHitTesting(false)
+                    // Lockdown's total time left, under the pomodoro countdown.
+                    if let ends = controller.lockdownEndsAt {
+                        HStack(spacing: 2) {
+                            Image(systemName: "lock.fill")
+                            Text(timerInterval: Date()...max(Date(), ends), countsDown: true)
+                        }
+                        .font(.caption2.monospacedDigit())
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.regularMaterial, in: Capsule())
+                    }
                 }
+                .allowsHitTesting(false)
             }
             .help("\(controller.state.title). Click for quick controls; drag to move.")
             .accessibilityElement()

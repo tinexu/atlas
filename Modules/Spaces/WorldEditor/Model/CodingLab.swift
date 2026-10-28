@@ -137,4 +137,23 @@ extension SpaceLibrary {
                                       hasFocusAction: hasFocusAction)
         }
     }
+
+    /// Turns lockdown on, with the coding apps allowed, for each Coding
+    /// Lab's default profile (once per Space; your later changes stay).
+    public func enableCodingLabLockdown() throws {
+        for space in try store.spaces() where space.templateID == CodingLab.templateID {
+            let key = "spaces.codingLab.lockdown.v1.\(space.id.uuidString)"
+            guard try store.preference(key, as: Bool.self) != true else { continue }
+            let profiles = try store.profiles(spaceID: space.id)
+            try store.database.transaction {
+                if let profile = profiles.first(where: \.isDefault) ?? profiles.first {
+                    let settingsKey = LockdownService.settingsKey(profileID: profile.id)
+                    if try store.preference(settingsKey, as: LockdownSettings.self) == nil {
+                        try store.setPreference(LockdownSettings.codingLab, for: settingsKey)
+                    }
+                }
+                try store.setPreference(true, for: key)
+            }
+        }
+    }
 }

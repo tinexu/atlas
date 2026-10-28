@@ -28,6 +28,17 @@ public final class MacTriggerEnvironment: TriggerEnvironment, @unchecked Sendabl
         return TriggerToken { observers.forEach(center.removeObserver) }
     }
 
+    public func observeActivations(_ handler: @escaping @Sendable (String, String) -> Void) -> TriggerToken {
+        let center = NSWorkspace.shared.notificationCenter
+        let observer = center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.activationPolicy == .regular, let bundleID = app.bundleIdentifier
+            else { return }
+            handler(bundleID, app.localizedName ?? bundleID)
+        }
+        return TriggerToken { center.removeObserver(observer) }
+    }
+
     public func observeWake(_ handler: @escaping @Sendable () -> Void) -> TriggerToken {
         let center = NSWorkspace.shared.notificationCenter
         let observer = center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { _ in

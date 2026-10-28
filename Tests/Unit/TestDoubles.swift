@@ -20,6 +20,8 @@ final class MockSystemAdapter: SystemAdapter, @unchecked Sendable {
     var refusesToQuit = false
     var failsToOpenURLs = false
     var existingPaths: [String: FileKind] = [:]
+    /// The frontmost app, as `runningApplications()` reports it.
+    var activeBundleID: String?
 
     var calls: [String] { lock.synchronized { _calls } }
 
@@ -58,6 +60,16 @@ final class MockSystemAdapter: SystemAdapter, @unchecked Sendable {
 
     func hideApplication(bundleID: String) async throws -> Bool {
         record("hide:\(bundleID)")
+        return lock.synchronized { _running.contains(bundleID) }
+    }
+
+    func unhideApplication(bundleID: String) async throws -> Bool {
+        record("unhide:\(bundleID)")
+        return lock.synchronized { _running.contains(bundleID) }
+    }
+
+    func activateApplication(bundleID: String) async throws -> Bool {
+        record("activate:\(bundleID)")
         return lock.synchronized { _running.contains(bundleID) }
     }
 
@@ -156,7 +168,7 @@ final class MockSystemAdapter: SystemAdapter, @unchecked Sendable {
 
     func runningApplications() -> [RunningApplication] {
         lock.synchronized {
-            _running.map { RunningApplication(bundleID: $0, name: installedApps[$0] ?? $0, processID: 42, isActive: false) }
+            _running.map { RunningApplication(bundleID: $0, name: installedApps[$0] ?? $0, processID: 42, isActive: $0 == activeBundleID) }
         }
     }
 }
@@ -390,13 +402,14 @@ final class MockTriggerEnvironment: TriggerEnvironment, @unchecked Sendable {
     private var hotKeys: [UUID: (key: HotKey, handler: @Sendable () -> Void)] = [:]
     private var powerHandlers: [UUID: @Sendable (PowerStatus) -> Void] = [:]
     private var wakeHandlers: [UUID: @Sendable () -> Void] = [:]
+    private var activationHandlers: [UUID: @Sendable (String, String) -> Void] = [:]
     private var schedules: [UUID: (date: Date, handler: @Sendable () -> Void)] = [:]
     private var _now = Date(timeIntervalSince1970: 1_800_000_000)
     /// Shortcuts "already taken by another app".
     var takenShortcuts: Set<String> = []
 
     var listenerCount: Int {
-        lock.synchronized { apps.count + folders.count + hotKeys.count + powerHandlers.count + wakeHandlers.count + schedules.count }
+        lock.synchronized { apps.count + folders.count + hotKeys.count + powerHandlers.count + wakeHandlers.count + schedules.count + activationHandlers.count }
     }
     var scheduledDates: [Date] { lock.synchronized { schedules.values.map(\.date).sorted() } }
 
@@ -424,6 +437,12 @@ final class MockTriggerEnvironment: TriggerEnvironment, @unchecked Sendable {
 
     func observePower(_ handler: @escaping @Sendable (PowerStatus) -> Void) -> TriggerToken { token(\.powerHandlers, handler) }
     func observeWake(_ handler: @escaping @Sendable () -> Void) -> TriggerToken { token(\.wakeHandlers, handler) }
+    func observeActivations(_ handler: @escaping @Sendable (String, String) -> Void) -> TriggerToken { token(\.activationHandlers, handler) }
+
+    /// An app came to the front.
+    func activate(_ bundleID: String, name: String) {
+        lock.synchronized { Array(activationHandlers.values) }.forEach { $0(bundleID, name) }
+    }
     func schedule(at date: Date, _ handler: @escaping @Sendable () -> Void) -> TriggerToken { token(\.schedules, (date, handler)) }
     func now() -> Date { lock.synchronized { _now } }
 

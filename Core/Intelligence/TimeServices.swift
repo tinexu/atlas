@@ -6,12 +6,16 @@ public final class TimeServices: Sendable {
     public let focus: FocusService
     public let calendar: CalendarService
     public let recommendations: RecommendationEngine
+    /// Lockdown focus mode, which runs its pomodoro on `focus`.
+    public let lockdown: LockdownService
 
-    init(schedule: ScheduleService, focus: FocusService, calendar: CalendarService, recommendations: RecommendationEngine) {
+    init(schedule: ScheduleService, focus: FocusService, calendar: CalendarService, recommendations: RecommendationEngine,
+         lockdown: LockdownService) {
         self.schedule = schedule
         self.focus = focus
         self.calendar = calendar
         self.recommendations = recommendations
+        self.lockdown = lockdown
     }
 }
 
@@ -34,7 +38,9 @@ extension AtlasCore {
         recommendations.perform = { [weak self] recommendation in
             await self?.carryOut(recommendation) ?? .failed("ATLAS isn't ready.")
         }
-        let services = TimeServices(schedule: schedule, focus: focus, calendar: calendarService, recommendations: recommendations)
+        let lockdown = LockdownService(store: store, events: events, environment: environment, engine: engine, system: system, focus: focus)
+        let services = TimeServices(schedule: schedule, focus: focus, calendar: calendarService, recommendations: recommendations,
+                                    lockdown: lockdown)
         setTime(services)
 
         let actions: [any AtlasAction] = [StartFocusAction(focus: focus, store: store), StopFocusAction(focus: focus), ShortcutRunAction(),
@@ -45,7 +51,11 @@ extension AtlasCore {
         events.subscribe { [weak recommendations] event in recommendations?.handle(event) }
         try? seedMorningSummaryIfNeeded()
         schedule.start()
+        // A lockdown from before a crash or relaunch loads first, so a pomodoro
+        // phase that ended meanwhile moves on when the focus timer restores.
+        lockdown.load()
         focus.restore()
+        Task { await lockdown.resume() }
         calendarService.start()
         return services
     }

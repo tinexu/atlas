@@ -80,6 +80,8 @@ final class AppModel: ObservableObject {
     let orbit: OrbitViewModel?
     /// Stage 06 Companion: the desktop assistant. Nil if ATLAS couldn't start.
     let companion: CompanionController?
+    /// Lockdown focus mode: prompt, pomodoro window and toasts.
+    let lockdown: LockdownModel
     /// A run to select when Run History appears (the Companion's "Details").
     @Published var focusedRunID: UUID?
     /// Stage 07 Time Architect and Today. Nil if scheduling couldn't start.
@@ -112,6 +114,7 @@ final class AppModel: ObservableObject {
             windowManager = WindowManagerModel(core: nil)
             orbit = nil
             companion = nil
+            lockdown = LockdownModel(core: nil)
             timeArchitect = nil
             startupError = error.localizedDescription
             if case DataSafetyError.corrupted = error, let url = try? AtlasStore.defaultURL() {
@@ -130,9 +133,14 @@ final class AppModel: ObservableObject {
             orbitError = ActionError.failed("Orbit couldn't start, so file features are unavailable.")
         }
         companion = core.map(CompanionController.init)
+        lockdown = LockdownModel(core: core)
         timeArchitect = core.flatMap { core in core.time.map { TimeArchitectModel(core: core, time: $0) } }
         focusSession = core?.time?.focus.session
         spaces.onError = { [weak self] message in self?.errorMessage = message }
+        lockdown.activate = { [weak spaces] spaceID, profileID, minutes, modeID in
+            spaces?.activate(spaceID, profileID: profileID, lockdownMinutes: minutes, lockdownModeID: modeID)
+        }
+        spaces.onLockdownPrompt = { [weak lockdown] pending in lockdown?.prompt(pending) }
         reloadWorkflows()
         reloadRuns()
         disabledActions = core?.permissions.disabledActions ?? []

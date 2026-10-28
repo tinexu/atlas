@@ -63,8 +63,27 @@ public struct MacSystemAdapter: SystemAdapter {
         await MainActor.run {
             let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             guard !apps.isEmpty else { return false }
-            apps.filter { !$0.isHidden }.forEach { _ = $0.hide() }
+            // Always ask: `isHidden` is a cached value that lags behind, e.g.
+            // just after a Dock click unhid the app. Hiding twice is harmless.
+            apps.forEach { _ = $0.hide() }
             return true
+        }
+    }
+
+    public func unhideApplication(bundleID: String) async throws -> Bool {
+        await MainActor.run {
+            let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            guard !apps.isEmpty else { return false }
+            apps.filter(\.isHidden).forEach { _ = $0.unhide() }
+            return true
+        }
+    }
+
+    public func activateApplication(bundleID: String) async throws -> Bool {
+        await MainActor.run {
+            guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { return false }
+            if app.isHidden { _ = app.unhide() }
+            return app.activate()
         }
     }
 

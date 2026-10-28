@@ -25,6 +25,8 @@ struct MenuBarContent: View {
             Divider()
         }
 
+        LockdownMenuItems(lockdown: model.lockdown)
+
         if let focus = model.core?.time?.focus {
             Section("Focus") {
                 if let session = model.focusSession {

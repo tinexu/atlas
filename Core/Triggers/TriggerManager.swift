@@ -46,6 +46,8 @@ public protocol TriggerEnvironment: Sendable {
     func registerHotKey(_ key: HotKey, _ handler: @escaping @Sendable () -> Void) throws -> TriggerToken
     func observePower(_ handler: @escaping @Sendable (PowerStatus) -> Void) -> TriggerToken
     func observeWake(_ handler: @escaping @Sendable () -> Void) -> TriggerToken
+    /// A regular app came to the front (Cmd-Tab, Dock click, …).
+    func observeActivations(_ handler: @escaping @Sendable (_ bundleID: String, _ name: String) -> Void) -> TriggerToken
     /// Fires once at `date` by the wall clock; late if the Mac was asleep.
     func schedule(at date: Date, _ handler: @escaping @Sendable () -> Void) -> TriggerToken
     func now() -> Date

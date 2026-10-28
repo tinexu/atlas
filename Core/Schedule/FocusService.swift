@@ -50,6 +50,10 @@ public final class FocusService: @unchecked Sendable {
     private let lock = NSLock()
     private var endTimer: TriggerToken?
     private var current: FocusSession?
+    /// Sessions another service runs as phases (lockdown's pomodoro). They
+    /// count down like any session, but their end is left to that service:
+    /// no end notification, Focus shortcut or break block from here.
+    var isManaged: (@Sendable (UUID) -> Bool)?
 
     init(store: AtlasStore, events: EventBus, environment: TriggerEnvironment, engine: AutomationEngine) {
         self.store = store
@@ -81,12 +85,13 @@ public final class FocusService: @unchecked Sendable {
     /// Starts a session, ending any current one. It shows on the timeline as
     /// a focus block unless it belongs to a block already.
     @discardableResult
-    public func start(minutes: Double? = nil, title: String? = nil, spaceID: UUID? = nil, blockID: UUID? = nil) -> FocusSession {
+    public func start(minutes: Double? = nil, title: String? = nil, spaceID: UUID? = nil, blockID: UUID? = nil,
+                      onTimeline: Bool = true) -> FocusSession {
         if session != nil { finish(completed: false, quietly: true) }
         let now = environment.now()
         let length = (minutes ?? Double(settings.minutes(forSpace: spaceID))) * 60
         var session = FocusSession(blockID: blockID, title: title ?? "Focus", plannedSeconds: length, startedAt: now, spaceID: spaceID)
-        if blockID == nil, let schedule {
+        if blockID == nil, onTimeline, let schedule {
             let block = ScheduleBlock(title: session.title, start: now, end: now.addingTimeInterval(length), kind: .focus, spaceID: spaceID)
             if let saved = try? schedule.save(block) {
                 session.blockID = saved.id
@@ -98,6 +103,7 @@ public final class FocusService: @unchecked Sendable {
         lock.withLock { current = session }
         scheduleEnd(session)
         publish(AtlasEvent.Name.focusStarted, session)
+        if isManaged?(session.id) == true { return session }
         if let shortcut = settings.shortcutOnStart, !shortcut.isEmpty { runShortcut(shortcut, label: "Focus started") }
         return session
     }
@@ -163,6 +169,9 @@ public final class FocusService: @unchecked Sendable {
 
     private func finish(completed: Bool, quietly: Bool = false) {
         guard var session = session else { return }
+        // Decided before `focus.ended` goes out: its owner may move on to
+        // its next session while handling it.
+        let managed = isManaged?(session.id) == true
         endTimer?.cancel()
         let now = environment.now()
         if session.state == .paused, let last = session.pauses.indices.last, session.pauses[last].end == nil {
@@ -178,7 +187,7 @@ public final class FocusService: @unchecked Sendable {
         }
         publish(AtlasEvent.Name.focusEnded, session, extra: ["completed": .bool(completed),
                                                              "elapsedMinutes": .number((session.elapsed(at: now) / 60).rounded())])
-        guard !quietly else { return }
+        guard !quietly, !managed else { return }
         afterSession(session, completed: completed)
     }
 

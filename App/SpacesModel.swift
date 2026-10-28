@@ -59,6 +59,8 @@ final class SpacesModel: ObservableObject {
     let module: SpacesModule?
     private let core: AtlasCore?
     var onError: ((String) -> Void)?
+    /// Asks "Lock in for how long?" for a profile that uses lockdown.
+    var onLockdownPrompt: ((LockdownModel.PendingStart) -> Void)?
     private var eventTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
 
@@ -188,12 +190,23 @@ final class SpacesModel: ObservableObject {
     /// Activates through `SpaceActivator`. Returns at once: the workflow
     /// starts immediately and any camera move runs alongside it.
     func activate(_ spaceID: UUID, profileID: UUID? = nil) {
-        guard let activator = module?.activator else { return }
         let profileID = profileID ?? selectedProfile(for: spaceID)?.id
+        if promptForLockdown(spaceID, profileID: profileID) { return }
+        activate(spaceID, profileID: profileID, lockdownMinutes: nil)
+    }
+
+    /// Activates, starting lockdown for `lockdownMinutes` (in the mode
+    /// `lockdownModeID`) if given.
+    func activate(_ spaceID: UUID, profileID: UUID?, lockdownMinutes: Double?, lockdownModeID: UUID? = nil) {
+        guard let activator = module?.activator else { return }
         activating.insert(spaceID)
         Task {
             do {
-                _ = try await activator.activate(spaceID: spaceID, profileID: profileID)
+                _ = try await activator.activate(spaceID: spaceID, profileID: profileID, lockdownMinutes: lockdownMinutes,
+                                                 lockdownModeID: lockdownModeID)
+            } catch SpaceActivationError.lockedDown {
+                // Lockdown already said so with a toast.
+                activating.remove(spaceID)
             } catch {
                 activating.remove(spaceID)
                 onError?(error.localizedDescription)
@@ -201,10 +214,22 @@ final class SpacesModel: ObservableObject {
         }
     }
 
+    /// Shows the lockdown prompt instead of activating when the profile
+    /// uses lockdown and none is running yet. Returns whether it did.
+    private func promptForLockdown(_ spaceID: UUID, profileID: UUID?) -> Bool {
+        guard let profileID, let lockdown = core?.time?.lockdown, lockdown.session == nil,
+              let settings = lockdown.settings(forProfile: profileID), settings.isEnabled,
+              let space = space(id: spaceID), let onLockdownPrompt
+        else { return false }
+        onLockdownPrompt(.init(spaceID: spaceID, spaceName: space.name, profileID: profileID, settings: settings))
+        return true
+    }
+
     /// Keyboard shortcuts go through the registered `space.activate` action,
     /// like any other surface that triggers an action.
     func activateFromShortcut(_ spaceID: UUID) {
         guard let core else { return }
+        if promptForLockdown(spaceID, profileID: selectedProfile(for: spaceID)?.id) { return }
         activating.insert(spaceID)
         Task {
             let run = await core.engine.invoke(

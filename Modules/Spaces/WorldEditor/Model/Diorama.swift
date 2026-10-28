@@ -74,6 +74,7 @@ extension SpaceLibrary {
         try upgradeCreativeStudios()
         try upgradeStudyLibraries()
         try upgradeCodingLabs()
+        try enableCodingLabLockdown()
     }
 
     /// Runs `objects` once per Space of `templateID` (tracked by `key`) and

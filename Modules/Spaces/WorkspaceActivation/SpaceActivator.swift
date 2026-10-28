@@ -6,6 +6,8 @@ public enum SpaceActivationError: Error, LocalizedError, Equatable {
     case profileNotFound(String)
     case noProfiles(String)
     case workflowMissing(String)
+    /// Lockdown is on in another Space. (lockdown Space, ends at)
+    case lockedDown(String, Date)
 
     public var errorDescription: String? {
         switch self {
@@ -17,6 +19,8 @@ public enum SpaceActivationError: Error, LocalizedError, Equatable {
             return "“\(space)” has no activation profile. Add one in the Space editor."
         case .workflowMissing(let profile):
             return "The automation behind “\(profile)” was deleted. Pick another one in the Space editor."
+        case .lockedDown(let space, let endsAt):
+            return "You're locked in to \(space) until \(endsAt.formatted(date: .omitted, time: .shortened)). End lockdown first to switch Spaces."
         }
     }
 }
@@ -46,6 +50,7 @@ public actor SpaceActivator {
     private let events: EventBus
     private let system: SystemAdapter
     private let windows: WindowService
+    private weak var core: AtlasCore?
     /// spaceID → runID for activations in progress.
     private var inFlight: [UUID: UUID] = [:]
 
@@ -55,7 +60,10 @@ public actor SpaceActivator {
         self.events = core.events
         self.system = core.system
         self.windows = core.windows
+        self.core = core
     }
+
+    private var lockdown: LockdownService? { core?.time?.lockdown }
 
     public var activatingSpaces: [UUID: UUID] { inFlight }
 
@@ -87,13 +95,40 @@ public actor SpaceActivator {
     ///
     /// Returns once both runs have finished. The activation run starts as
     /// soon as possible, so callers can animate in parallel without delaying it.
-    public func activate(spaceID: UUID, profileID: UUID? = nil) async throws -> SpaceActivation {
+    ///
+    /// With `lockdownMinutes`, the profile's lockdown allowed apps open too
+    /// (before the layout, so it arranges them), and lockdown starts once
+    /// the run finishes. While lockdown is on, switching to another Space
+    /// is refused with `lockedDown`.
+    public func activate(spaceID: UUID, profileID: UUID? = nil, lockdownMinutes: Double? = nil,
+                         lockdownModeID: UUID? = nil) async throws -> SpaceActivation {
         guard let space = try store.space(id: spaceID) else {
             throw SpaceActivationError.spaceNotFound(spaceID.uuidString)
+        }
+        if let active = lockdown?.session, active.spaceID != space.id {
+            lockdown?.notice("You're locked in to \(active.spaceName) until \(active.endsAt.formatted(date: .omitted, time: .shortened)). End lockdown to switch Spaces.")
+            throw SpaceActivationError.lockedDown(active.spaceName, active.endsAt)
         }
         let profile = try chooseProfile(for: space, requested: profileID)
         guard var workflow = try store.workflow(id: profile.workflowID) else {
             throw SpaceActivationError.workflowMissing(profile.name)
+        }
+        var lockdownStart: (settings: LockdownSettings, plan: LockdownService.Plan, minutes: Double)?
+        if let lockdownMinutes, lockdownMinutes > 0, let lockdown, let settings = lockdown.settings(forProfile: profile.id) {
+            let plan = lockdown.plan(for: settings, modeID: lockdownModeID)
+            let opening = Set(SpaceApps.bundleIDs(in: workflow))
+            let browsers = Set(plan.links.map(\.browserBundleID))
+            // Browsers open with their page below, not on their own.
+            for app in plan.apps where !opening.contains(app.bundleID) && !browsers.contains(app.bundleID) {
+                workflow.appendStep(WorkflowStep(actionID: LaunchApplicationAction.id, parameters: ["bundleId": .string(app.bundleID)],
+                                                 label: "Open \(app.name) (lockdown)"))
+            }
+            for link in plan.links {
+                workflow.appendStep(WorkflowStep(actionID: OpenURLAction.id,
+                                                 parameters: ["url": .string(link.url), "bundleId": .string(link.browserBundleID)],
+                                                 label: "Open \(link.host) in \(link.browserName) (lockdown)"))
+            }
+            lockdownStart = (settings, plan, lockdownMinutes)
         }
         let layout = try profile.windowLayoutID.flatMap { try store.windowLayout(id: $0) }
         if let layout {
@@ -152,6 +187,10 @@ public actor SpaceActivator {
             transitionRun = await engine.result(of: transitionRunID)
         }
         if inFlight[space.id] == runID { inFlight[space.id] = nil }
+        if let lockdownStart, let lockdown {
+            await lockdown.start(spaceID: space.id, spaceName: space.name, profileID: profile.id, minutes: lockdownStart.minutes,
+                                 settings: lockdownStart.settings, plan: lockdownStart.plan)
+        }
 
         payload["state"] = .string(run.state.rawValue)
         if let transitionRunID { payload["transitionRunId"] = .string(transitionRunID.uuidString) }

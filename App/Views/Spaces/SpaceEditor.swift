@@ -20,6 +20,7 @@ struct SpaceEditor: View {
     @State private var customGroup = ""
     @State private var editingWorkflowID: UUID?
     @State private var editingObject: SpaceObject?
+    @State private var editingLockdown: ActivationProfile?
 
     init(original: Space) {
         self.original = original
@@ -83,6 +84,26 @@ struct SpaceEditor: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section {
+                    let saved = Set(spaces.profiles(for: original.id).map(\.id))
+                    ForEach(profiles) { profile in
+                        HStack {
+                            Label(profile.name, systemImage: "lock")
+                            Spacer()
+                            Text(lockdownSummary(for: profile.id))
+                                .foregroundStyle(.secondary)
+                            Button("Settings…") { editingLockdown = profile }
+                                .disabled(!saved.contains(profile.id))
+                        }
+                    }
+                } header: {
+                    Text("Lockdown")
+                } footer: {
+                    Text("Lockdown asks how long to lock in when you enter, opens your allowed apps and keeps everything else out of reach until the timer ends or you end it. Settings are per profile; save a new profile first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Room objects") {
                     let objects = spaces.objects(for: original.id)
                     if objects.isEmpty {
@@ -133,6 +154,11 @@ struct SpaceEditor: View {
             WorkflowEditorSheet(workflow: workflow)
                 .environmentObject(model)
         }
+        .sheet(item: $editingLockdown) { profile in
+            LockdownSettingsView(profileID: profile.id, profileName: profile.name,
+                                 settings: model.core?.time?.lockdown.settings(forProfile: profile.id) ?? LockdownSettings())
+                .environmentObject(model)
+        }
         .sheet(item: $editingObject) { object in
             ObjectEditor(original: object)
                 .environmentObject(model)
@@ -167,7 +193,12 @@ struct SpaceEditor: View {
         }
     }
 
-    private var transitionFooter: String {
+    private func lockdownSummary(for profileID: UUID) -> String {
+        guard let settings = model.core?.time?.lockdown.settings(forProfile: profileID), settings.isEnabled else { return "Off" }
+        return settings.modes.count == 1 ? "On" : "On · \(settings.modes.count) modes"
+    }
+
+        private var transitionFooter: String {
         switch draft.transitionBehavior {
         case .leaveRunning:
             return "The previous Space's apps stay as they are. ATLAS never quits apps when you switch Spaces."

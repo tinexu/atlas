@@ -82,13 +82,8 @@ struct AtlasApp: App {
                 .environmentObject(model)
                 .environmentObject(model.spaces)
         } label: {
-            // A live focus countdown when a session is running (Stage 07).
-            if let session = model.focusSession, session.state == .running {
-                Image(systemName: "scope")
-                Text(timerInterval: Date()...session.endsAt(from: Date()), countsDown: true)
-            } else {
-                Image(systemName: model.isPaused ? "pause.circle" : "globe.americas.fill")
-            }
+            // A live lockdown or focus countdown (Stage 07).
+            MenuBarLabel(model: model, lockdown: model.lockdown)
         }
     }
 }

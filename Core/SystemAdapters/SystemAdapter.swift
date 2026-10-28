@@ -99,6 +99,10 @@ public protocol SystemAdapter: Sendable {
     /// Hides every window of a running app without quitting it. Returns
     /// false if the app wasn't running.
     func hideApplication(bundleID: String) async throws -> Bool
+    /// Shows a hidden app's windows again. Returns false if it wasn't running.
+    func unhideApplication(bundleID: String) async throws -> Bool
+    /// Brings a running app to the front. Returns false if it wasn't running.
+    func activateApplication(bundleID: String) async throws -> Bool
     /// Minimizes a running app's windows into the Dock (needs
     /// Accessibility). Returns how many windows were minimized.
     func minimizeApplicationWindows(bundleID: String) async throws -> Int
