@@ -154,12 +154,29 @@ private struct WorkflowRow: View {
                 Text(workflow.name)
                     .fontWeight(.medium)
                     .foregroundStyle(workflow.isEnabled ? .primary : .secondary)
-                Text("\(workflow.steps.count) step\(workflow.steps.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let problem = triggerProblem {
+                    Label("Not watching: folder isn't in Orbit", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .help(problem)
+                } else {
+                    Text("\(workflow.steps.count) step\(workflow.steps.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 3)
+    }
+
+    /// A trigger that's on but isn't watching because its folder isn't in Orbit.
+    private var triggerProblem: String? {
+        guard workflow.isEnabled, let core = model.core else { return nil }
+        return workflow.triggerNodes.lazy.filter(\.isEnabled).compactMap { node -> String? in
+            guard let folder = node.parameters["folder"]?.stringValue, !folder.contains("{{"),
+                  !core.fileAccess.isAllowed(folder) else { return nil }
+            return core.triggers?.problem(for: node.id) ?? TriggerManager.unauthorizedMessage(folder)
+        }.first
     }
 }
 

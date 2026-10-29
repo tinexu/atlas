@@ -1,10 +1,13 @@
 import AppKit
+import Combine
 import AtlasCompanion
 import AtlasCompanionUI
 import AtlasCore
+import AtlasStudy
 import AtlasFlow
 import AtlasOrbit
 import AtlasOrbitUI
+import AtlasSpaces
 import AtlasSpacesUI
 import ServiceManagement
 import SwiftUI
@@ -82,6 +85,8 @@ final class AppModel: ObservableObject {
     let companion: CompanionController?
     /// Lockdown focus mode: prompt, pomodoro window and toasts.
     let lockdown: LockdownModel
+    /// The Study Library: courses and what its room shows.
+    let study: StudyModel
     /// A run to select when Run History appears (the Companion's "Details").
     @Published var focusedRunID: UUID?
     /// Stage 07 Time Architect and Today. Nil if scheduling couldn't start.
@@ -104,6 +109,43 @@ final class AppModel: ObservableObject {
     private var eventTask: Task<Void, Never>?
     private var accessibilityMonitor: Timer?
     private var hadAccessibility = false
+    private var linkObserver: NSObjectProtocol?
+    private var folderObserver: NSObjectProtocol?
+    private var readerWatch: AnyCancellable?
+
+    /// "Add Downloads to Orbit": the folder picker, opened at the folder.
+    /// Triggers watching it start, and open editors revalidate.
+    @discardableResult
+    func addFolderToOrbit(_ path: String) -> Bool {
+        guard let orbit else {
+            errorMessage = "Orbit isn't available, so folders can't be added right now."
+            return false
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let added = orbit.addFolderToOrbit(path)
+        if added { reloadWorkflows() }
+        return added
+    }
+
+    /// Runs a run's failed steps again, then shows the new run.
+    func retryFailedSteps(of run: WorkflowRun) {
+        guard let engine = core?.engine else { return }
+        Task { @MainActor in
+            guard let retried = await engine.retryFailedSteps(of: run.id) else { return }
+            reloadRuns()
+            focusedRunID = retried.id
+        }
+    }
+
+    /// atlas:// links from notifications. "atlas://study/board": the Study
+    /// Library, with the chalkboard's assignments panel open.
+    func open(link: String) {
+        guard link == "atlas://study/board" else { return }
+        section = .spaces
+        if let id = study.studySpaceID { spaces.selectedSpaceID = id }
+        bringForward()
+        study.showBoard()
+    }
 
     init() {
         do {
@@ -115,6 +157,7 @@ final class AppModel: ObservableObject {
             orbit = nil
             companion = nil
             lockdown = LockdownModel(core: nil)
+            study = StudyModel(core: nil)
             timeArchitect = nil
             startupError = error.localizedDescription
             if case DataSafetyError.corrupted = error, let url = try? AtlasStore.defaultURL() {
@@ -134,6 +177,7 @@ final class AppModel: ObservableObject {
         }
         companion = core.map(CompanionController.init)
         lockdown = LockdownModel(core: core)
+        study = StudyModel(core: core)
         timeArchitect = core.flatMap { core in core.time.map { TimeArchitectModel(core: core, time: $0) } }
         focusSession = core?.time?.focus.session
         spaces.onError = { [weak self] message in self?.errorMessage = message }
@@ -141,6 +185,17 @@ final class AppModel: ObservableObject {
             spaces?.activate(spaceID, profileID: profileID, lockdownMinutes: minutes, lockdownModeID: modeID)
         }
         spaces.onLockdownPrompt = { [weak lockdown] pending in lockdown?.prompt(pending) }
+        study.spaces = spaces
+        spaces.studyState = { [weak study] in study?.roomState }
+        spaces.studyObjectClicked = { [weak study] object in study?.objectClicked(object) ?? false }
+        folderObserver = NotificationCenter.default.addObserver(forName: .atlasAddFolderToOrbit, object: nil, queue: .main) { [weak self] note in
+            guard let path = note.object as? String else { return }
+            MainActor.assumeIsolated { _ = self?.addFolderToOrbit(path) }
+        }
+        linkObserver = NotificationCenter.default.addObserver(forName: .atlasOpenLink, object: nil, queue: .main) { [weak self] note in
+            guard let link = note.object as? String else { return }
+            MainActor.assumeIsolated { self?.open(link: link) }
+        }
         reloadWorkflows()
         reloadRuns()
         disabledActions = core?.permissions.disabledActions ?? []
@@ -217,13 +272,43 @@ final class AppModel: ObservableObject {
             self?.section = .orbit
             self?.bringForward()
         }
+        host.addFolderToOrbit = { [weak self] path in self?.addFolderToOrbit(path) ?? false }
         host.draftWorkflow = { [weak self] name, bundleIDs in
             self?.draftWorkflow(named: name, launching: bundleIDs)
         }
         host.isPaused = { [weak self] in self?.isPaused ?? false }
         host.describeAutomation = { [weak self] prompt in self?.describeAutomation(prompt) }
+        host.holdsSuggestionsWhileStudying = { [weak self] in self?.study.settings.holdSuggestions ?? true }
         companion.host = host
         companion.start()
+        connectReader(companion)
+    }
+
+    /// The Companion reading on the Study Library's window seat: its look,
+    /// whether it's in a study focus, and what's waiting for the break.
+    private func connectReader(_ companion: CompanionController) {
+        study.readerInfo = { [weak self, weak companion] in
+            guard let self, let companion, self.study.settings.companionReads else { return nil }
+            let settings = companion.settings
+            let style: StudyRoomState.Reader.Style = settings.character == .creature ? .creature : settings.character == .orb ? .orb : .robot
+            let waiting = companion.held.count
+            let detail: String
+            if companion.isStudyFocus {
+                detail = waiting > 0 ? "Reading quietly · \(waiting) thing\(waiting == 1 ? "" : "s") waiting for your break"
+                    : "Reading quietly while you study"
+            } else {
+                detail = waiting > 0 ? "\(waiting) suggestion\(waiting == 1 ? "" : "s") waiting · click to see" : "Reading · click for anything waiting"
+            }
+            return StudyRoomState.Reader(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
+                                         isFocused: companion.isStudyFocus, waiting: waiting, detail: detail)
+        }
+        study.onReaderClicked = { [weak companion] in companion?.showHeld(sayIfNone: true) }
+        readerWatch = companion.$held.map(\.count).removeDuplicates().combineLatest(
+            companion.$isStudyFocus.removeDuplicates(),
+            companion.$settings.map { "\($0.character.rawValue)|\($0.primaryColor)|\($0.secondaryColor)" }.removeDuplicates()
+        )
+        .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+        .sink { [weak self] _ in MainActor.assumeIsolated { self?.study.refreshRoom() } }
     }
 
     /// Shows the main window, opening it again if it was closed.
@@ -718,6 +803,10 @@ final class ConfirmationNotifications: NSObject, UNUserNotificationCenterDelegat
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        if let link = response.notification.request.content.userInfo["atlasLink"] as? String {
+            await MainActor.run { NotificationCenter.default.post(name: .atlasOpenLink, object: link) }
+            return
+        }
         resolve(response.notification.request.identifier, response.actionIdentifier == "allow")
     }
 

@@ -2,6 +2,7 @@ import AppKit
 import AtlasCore
 import AtlasSpaces
 import AtlasSpacesUI
+import AtlasStudy
 import AtlasFlow
 import SwiftUI
 
@@ -21,6 +22,8 @@ struct SpaceEditor: View {
     @State private var editingWorkflowID: UUID?
     @State private var editingObject: SpaceObject?
     @State private var editingLockdown: ActivationProfile?
+    @State private var editingCourses = false
+    @State private var editingStudySettings = false
 
     init(original: Space) {
         self.original = original
@@ -104,6 +107,23 @@ struct SpaceEditor: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if draft.templateID == StudyLibrary.templateID {
+                    Section {
+                        HStack {
+                            Label("\(model.study.activeCourses.count) course\(model.study.activeCourses.count == 1 ? "" : "s")",
+                                  systemImage: "books.vertical")
+                            Spacer()
+                            Button("Courses…") { editingCourses = true }
+                            Button("Study Settings…") { editingStudySettings = true }
+                        }
+                    } header: {
+                        Text("Study Library")
+                    } footer: {
+                        Text("Each course gets a book on the shelf; clicking it opens the course's folder, notes and site.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Room objects") {
                     let objects = spaces.objects(for: original.id)
                     if objects.isEmpty {
@@ -153,6 +173,12 @@ struct SpaceEditor: View {
         )) { workflow in
             WorkflowEditorSheet(workflow: workflow)
                 .environmentObject(model)
+        }
+        .sheet(isPresented: $editingCourses) {
+            CoursesSettingsView().environmentObject(model.study)
+        }
+        .sheet(isPresented: $editingStudySettings) {
+            StudySettingsView().environmentObject(model.study).environmentObject(model)
         }
         .sheet(item: $editingLockdown) { profile in
             LockdownSettingsView(profileID: profile.id, profileName: profile.name,

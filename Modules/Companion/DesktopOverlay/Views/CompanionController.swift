@@ -18,11 +18,15 @@ public struct CompanionHost {
     public var showCleanup: () -> Void = {}
     public var showReviewQueue: () -> Void = {}
     public var showOrbitFolders: () -> Void = {}
+    /// The folder picker opened at this folder; true if it was added to Orbit.
+    public var addFolderToOrbit: (String) -> Bool = { _ in false }
     /// Opens a new, unsaved-looking draft in the editor (saved disabled).
     public var draftWorkflow: (String, [String]) -> Void = { _, _ in }
     public var isPaused: () -> Bool = { false }
     /// Opens "Describe an Automation" with the text typed.
     public var describeAutomation: (String) -> Void = { _ in }
+    /// Whether offers wait for a study session's break (the Study Library's setting).
+    public var holdsSuggestionsWhileStudying: () -> Bool = { true }
 
     public init() {}
 }
@@ -36,6 +40,8 @@ public struct StatusBubble: Identifiable, Equatable {
     public var runID: UUID?
     public var fixTitle: String?
     public var fix: Suggestion.Action?
+    public var secondaryTitle: String?
+    public var secondary: Suggestion.Action?
     public var suggestion: Suggestion?
     public var recommendation: Recommendation?
 }
@@ -58,6 +64,17 @@ public final class CompanionController: ObservableObject {
     @Published public private(set) var focusSession: FocusSession?
     /// When the running lockdown ends, for the countdown under the pomodoro one.
     @Published public private(set) var lockdownEndsAt: Date?
+    /// A study session's focus phase: the Companion reads quietly, and
+    /// offers wait (in `held`) for the next break or the session's end.
+    @Published public private(set) var isStudyFocus = false
+    /// Offers and suggestions held during study focus, oldest first.
+    @Published public private(set) var held: [Suggestion] = []
+    private var hold = StudyHold() {
+        didSet {
+            isStudyFocus = hold.isFocus
+            held = hold.held
+        }
+    }
 
     public let core: AtlasCore
     public let runner: CommandRunner
@@ -163,7 +180,7 @@ public final class CompanionController: ObservableObject {
 
     var presentation: CharacterPresentation {
         CharacterPresentation.make(for: state, intensity: settings.intensity,
-                                   reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+                                   reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, reading: isStudyFocus)
     }
 
     private func feed(_ input: CompanionStateMachine.Input) {
@@ -213,6 +230,13 @@ public final class CompanionController: ObservableObject {
             showResult(of: event)
         case AtlasEvent.Name.actionEffect where event.payload["kind"]?.stringValue == "app":
             if let bundleID = event.payload["value"]?.stringValue { atlasLaunches[bundleID] = Date() }
+        case AtlasEvent.Name.companionOffer:
+            offer(event)
+        case AtlasEvent.Name.studySessionChanged:
+            let active = !(event.payload["sessionId"]?.stringValue ?? "").isEmpty
+            setStudyFocus(active && event.payload["phase"]?.stringValue == "focus")
+        case AtlasEvent.Name.studySessionEnded:
+            setStudyFocus(false)
         case _ where event.name.hasPrefix("lockdown."):
             lockdownEndsAt = core.time?.lockdown.session?.endsAt
         case _ where event.name.hasPrefix("focus."):
@@ -242,13 +266,17 @@ public final class CompanionController: ObservableObject {
               bubblePolicy.shouldShow(workflowID: run.workflowID, trigger: trigger, state: run.state, at: Date())
         else { return }
         let failed = run.state == .failed || run.state == .partiallySucceeded
+        // No chatter while studying: only failures interrupt the reading.
+        if isStudyFocus && !failed { return }
         var bubble = StatusBubble(text: StatusMessages.message(for: run, store: core.store), isFailure: failed, runID: run.id)
         if failed {
             let names = Dictionary(apps.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
-            let explanation = FailureExplainer.explain(run) { names[$0] }
+            let explanation = FailureExplainer.explain(run, fileAccess: core.fileAccess) { names[$0] }
             bubble.detail = explanation.message
             bubble.fixTitle = explanation.fixTitle
             bubble.fix = explanation.fix
+            bubble.secondaryTitle = explanation.secondaryTitle
+            bubble.secondary = explanation.secondary
         }
         showBubble(bubble, seconds: failed ? 20 : 6)
     }
@@ -283,7 +311,39 @@ public final class CompanionController: ObservableObject {
 
     // MARK: - Suggestions
 
-    private func show(_ suggestion: Suggestion) {
+    /// An automation's offer ("CHEM101 starts at 10:00 — open its book?").
+    private func offer(_ event: AtlasEvent) {
+        guard settings.suggestionsEnabled,
+              let message = event.payload["message"]?.stringValue,
+              let actionID = event.payload["actionId"]?.stringValue else { return }
+        var parameters: ActionParameters = [:]
+        for (key, value) in event.payload where key.hasPrefix("param.") { parameters[String(key.dropFirst(6))] = value }
+        show(Suggestion(kind: .offer, title: message, reason: "An automation offered it", actionTitle: event.payload["button"]?.stringValue ?? "Do it",
+                        action: .runAction(ActionID(actionID), parameters)),
+             urgent: event.payload["urgent"]?.boolValue == true)
+    }
+
+    /// Study focus started or ended. Ending it (a break, or the session's
+    /// end) brings out what was held, one at a time.
+    private func setStudyFocus(_ focus: Bool) {
+        if let next = hold.setFocus(focus) { present(next) }
+    }
+
+    /// Shows the next held suggestion (the in-room reader's click does this
+    /// too). With none: a quiet note that nothing's waiting.
+    public func showHeld(sayIfNone: Bool = false) {
+        if let next = hold.next() {
+            present(next)
+        } else if sayIfNone {
+            showBubble(StatusBubble(text: "Nothing waiting · just reading", isFailure: false), seconds: 5)
+        }
+    }
+
+    private func show(_ suggestion: Suggestion, urgent: Bool = false) {
+        if let now = hold.offer(suggestion, urgent: urgent, holding: host.holdsSuggestionsWhileStudying()) { present(now) }
+    }
+
+    private func present(_ suggestion: Suggestion) {
         showBubble(StatusBubble(text: suggestion.title, detail: suggestion.detail, isFailure: suggestion.kind == .workflowFailed,
                                 fixTitle: suggestion.actionTitle, fix: suggestion.action, suggestion: suggestion), seconds: 25)
     }
@@ -302,6 +362,8 @@ public final class CompanionController: ObservableObject {
     }
 
     private func show(_ recommendation: Recommendation) {
+        // Recommendations are worked out again later; while studying, skip them.
+        guard !isStudyFocus else { return }
         showBubble(StatusBubble(text: recommendation.title, detail: recommendation.detail, isFailure: recommendation.kind == .repeatedFailure,
                                 fixTitle: recommendation.action.title, recommendation: recommendation), seconds: 45)
     }
@@ -335,16 +397,47 @@ public final class CompanionController: ObservableObject {
         suggestions.accepted(suggestion)
         perform(suggestion.action)
         dismissBubble()
+        showNextHeldSoon()
     }
 
     func dismiss(_ suggestion: Suggestion, forever: Bool) {
         suggestions.dismissed(suggestion, forever: forever)
         if forever { update { $0.mutedSuggestions.insert(suggestion.kind.rawValue) } }
         dismissBubble()
+        showNextHeldSoon()
+    }
+
+    private func showNextHeldSoon() {
+        guard !held.isEmpty, !isStudyFocus else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            MainActor.assumeIsolated { self?.showHeld() }
+        }
+    }
+
+    /// A bubble's button. After "Add Downloads to Orbit" the bubble offers
+    /// to retry the failed steps, now that they can work.
+    func perform(_ action: Suggestion.Action, from bubble: StatusBubble) {
+        dismissBubble()
+        if case .addFolderToOrbit(let folder) = action {
+            guard host.addFolderToOrbit(folder) else { return }
+            if case .retryFailedSteps = bubble.secondary {
+                var next = StatusBubble(text: "\(FileLocation.displayName(for: folder)) is in Orbit now", isFailure: false, runID: bubble.runID)
+                next.detail = "Run the steps that failed again?"
+                next.fixTitle = bubble.secondaryTitle
+                next.fix = bubble.secondary
+                showBubble(next, seconds: 30)
+            }
+            return
+        }
+        perform(action)
     }
 
     func perform(_ action: Suggestion.Action) {
         switch action {
+        case .addFolderToOrbit(let folder): _ = host.addFolderToOrbit(folder)
+        case .retryFailedSteps(let runID):
+            let engine = core.engine
+            Task { _ = await engine.retryFailedSteps(of: runID) }
         case .openWorkflowAt(let workflowID, let nodeID): host.openWorkflowAt(workflowID, nodeID)
         case .openPermissions: host.openSection("permissions")
         case .openOrbitFolders: host.showOrbitFolders()
@@ -352,6 +445,9 @@ public final class CompanionController: ObservableObject {
         case .openLargestFiles: host.showLargestFiles()
         case .openRunHistory(let id): host.openRunHistory(id)
         case .draftWorkflow(let name, let bundleIDs): host.draftWorkflow(name, bundleIDs)
+        case .runAction(let id, let parameters):
+            let engine = core.engine
+            Task { _ = await engine.invoke(id, parameters: parameters, source: "companion.offer") }
         case .applyLayout(let name):
             let plan = DeterministicParser(vocabulary: vocabulary()).layoutApplyPlan(name)
             Task { _ = await runner.run(plan, text: "", source: .click) }

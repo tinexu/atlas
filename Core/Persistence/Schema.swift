@@ -481,6 +481,58 @@ enum Schema {
         ALTER TABLE file_operation ADD COLUMN state TEXT NOT NULL DEFAULT 'done';
         CREATE INDEX idx_file_operation_state ON file_operation(state);
         """,
+        // v9 — Study Library: courses (with the folder's security-scoped
+        // bookmark), assignments merged from calendar, Reminders and manual
+        // entry (one row per source item), and study sessions.
+        """
+        CREATE TABLE course (
+            id               TEXT PRIMARY KEY,
+            position         INTEGER NOT NULL DEFAULT 0,
+            name             TEXT NOT NULL,
+            code             TEXT NOT NULL,
+            aliases_json     TEXT NOT NULL DEFAULT '[]',
+            color            TEXT NOT NULL,
+            folder_path      TEXT,
+            folder_bookmark  BLOB,
+            notes_json       TEXT NOT NULL DEFAULT '{}',
+            links_json       TEXT NOT NULL DEFAULT '[]',
+            match_json       TEXT NOT NULL DEFAULT '[]',
+            opens_json       TEXT NOT NULL DEFAULT '{}',
+            term             TEXT NOT NULL DEFAULT '',
+            archived         INTEGER NOT NULL DEFAULT 0,
+            created_at       REAL NOT NULL
+        );
+        CREATE INDEX idx_course_position ON course(archived, position);
+
+        CREATE TABLE assignment (
+            id           TEXT PRIMARY KEY,
+            course_id    TEXT REFERENCES course(id) ON DELETE SET NULL,
+            title        TEXT NOT NULL,
+            due_at       REAL,
+            kind         TEXT NOT NULL DEFAULT 'assignment',
+            source       TEXT NOT NULL,
+            external_id  TEXT,
+            done         INTEGER NOT NULL DEFAULT 0,
+            done_at      REAL,
+            updated_at   REAL NOT NULL,
+            UNIQUE (source, external_id)
+        );
+        CREATE INDEX idx_assignment_due ON assignment(done, due_at);
+
+        CREATE TABLE study_session (
+            id               TEXT PRIMARY KEY,
+            course_id        TEXT REFERENCES course(id) ON DELETE SET NULL,
+            course_guess     TEXT,
+            term             TEXT NOT NULL DEFAULT '',
+            started_at       REAL NOT NULL,
+            ended_at         REAL,
+            focused_seconds  REAL NOT NULL DEFAULT 0,
+            pomodoros        INTEGER NOT NULL DEFAULT 0,
+            files_json       TEXT NOT NULL DEFAULT '[]',
+            completed_json   TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE INDEX idx_study_session_start ON study_session(started_at);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

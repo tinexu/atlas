@@ -24,6 +24,8 @@ final class MissionControlScene {
 
     private var rooms: [UUID: (key: BuildKey, entity: Entity)] = [:]
     private var activeRooms: Set<UUID> = []
+    /// Course books each room was last built with, to slide in new ones.
+    private var shelvedBooks: [UUID: Set<UUID>] = [:]
     private var hovered: Entity?
     /// The RealityKit scene room motion is attached to; a new one after a pause.
     private weak var attachedScene: RealityKit.Scene?
@@ -36,6 +38,7 @@ final class MissionControlScene {
     init() {
         RoomMotionComponent.registerComponent()
         RoomBuilder.HoverComponent.registerComponent()
+        RoomBuilder.HoverOffsetComponent.registerComponent()
         camera.camera.fieldOfViewInDegrees = 45
         root.addChild(camera)
         root.addChild(world)
@@ -85,7 +88,7 @@ final class MissionControlScene {
                     if let hovered, sequence(first: hovered, next: \.parent).contains(where: { $0 === old }) { self.hovered = nil }
                 }
                 entity = RoomBuilder.build(space: snapshot.space, room: snapshot.room, objects: snapshot.objects,
-                                           detail: key.detail, reduceMotion: reduceMotion)
+                                           detail: key.detail, reduceMotion: reduceMotion, study: snapshot.study)
                 world.addChild(entity)
                 if let motion = entity.components[RoomMotionComponent.self]?.motion {
                     motion.start()
@@ -93,6 +96,16 @@ final class MissionControlScene {
                     motion.setActive(snapshot.isActive, animated: false)
                 }
                 rooms[snapshot.id] = (key, entity)
+                let books = Set(snapshot.study?.books.map(\.id) ?? [])
+                if let before = shelvedBooks[snapshot.id], key.detail,
+                   let motion = entity.components[RoomMotionComponent.self]?.motion as? StudyLibraryMotion {
+                    motion.slideIn(books.subtracting(before))
+                }
+                if key.detail { shelvedBooks[snapshot.id] = books }
+            }
+            // Hourglass and candle: applied only when they change.
+            if let study = snapshot.study, let motion = entity.components[RoomMotionComponent.self]?.motion as? StudyLibraryMotion {
+                motion.update(study)
             }
             if snapshot.isActive != activeRooms.contains(snapshot.id) {
                 // Only a change animates, not a room that was already active.
@@ -180,18 +193,32 @@ final class MissionControlScene {
     enum Hit {
         case room(UUID)
         case object(UUID, room: UUID)
+        /// A course's book in the Study Library.
+        case course(UUID, room: UUID)
+        /// A Study Library item that isn't a Space object (the hourglass, the candle).
+        case item(StudyRoomState.Item, room: UUID)
     }
 
     /// Resolves a clicked entity (possibly a deep child) to a room or object.
     func hit(for entity: Entity) -> Hit? {
         var current: Entity? = entity
         var objectID: UUID?
+        var courseID: UUID?
+        var item: StudyRoomState.Item?
         while let node = current {
-            if objectID == nil, let id = Self.id(in: node.name, prefix: "object:") {
+            if objectID == nil, courseID == nil, item == nil, node.name.hasPrefix("studyitem:") {
+                item = StudyRoomState.Item(entityName: node.name)
+            }
+            if objectID == nil, courseID == nil, let id = Self.id(in: node.name, prefix: "object:") {
                 objectID = id
+            }
+            if objectID == nil, courseID == nil, let id = Self.id(in: node.name, prefix: "course:") {
+                courseID = id
             }
             if let roomID = Self.id(in: node.name, prefix: "room:") {
                 if let objectID { return .object(objectID, room: roomID) }
+                if let courseID { return .course(courseID, room: roomID) }
+                if let item { return .item(item, room: roomID) }
                 return .room(roomID)
             }
             current = node.parent
@@ -202,9 +229,9 @@ final class MissionControlScene {
     /// Highlights the object under the pointer (`point` in view coordinates,
     /// nil when the pointer leaves) and returns it. Rays are cast from the
     /// camera by hand, since RealityView on macOS has no hit test.
-    func hover(at point: CGPoint?, in size: CGSize, reduceMotion: Bool) -> (object: UUID, room: UUID)? {
+    func hover(at point: CGPoint?, in size: CGSize, reduceMotion: Bool) -> Hit? {
         var target: Entity?
-        var result: (UUID, UUID)?
+        var result: Hit?
         if let point, size.width > 0, size.height > 0, let scene = root.scene {
             let tanHalf = tan(camera.camera.fieldOfViewInDegrees * .pi / 360)
             let aspect = Float(size.width / size.height)
@@ -221,9 +248,14 @@ final class MissionControlScene {
             ))
             let origin = SIMD3(matrix.columns.3.x, matrix.columns.3.y, matrix.columns.3.z)
             if let entity = scene.raycast(origin: origin, direction: direction, length: 200, query: .nearest).first?.entity,
-               case .object(let objectID, let roomID) = hit(for: entity) {
-                target = objectContainer(entity)
-                result = (objectID, roomID)
+               let found = hit(for: entity) {
+                switch found {
+                case .object, .course, .item:
+                    target = objectContainer(entity)
+                    result = found
+                case .room:
+                    break
+                }
             }
         }
         if target !== hovered {
@@ -234,10 +266,13 @@ final class MissionControlScene {
         return result
     }
 
+    /// What the pointer is over right now (for right-click menus).
+    var hoveredHit: Hit? { hovered.flatMap(hit(for:)) }
+
     private func objectContainer(_ entity: Entity) -> Entity? {
         var current: Entity? = entity
         while let node = current {
-            if node.name.hasPrefix("object:") { return node }
+            if node.name.hasPrefix("object:") || node.name.hasPrefix("course:") || node.name.hasPrefix("studyitem:") { return node }
             current = node.parent
         }
         return nil

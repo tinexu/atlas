@@ -15,16 +15,20 @@ public struct ValidationIssue: Hashable, Sendable, Identifiable {
     public let message: String
     public let nodeID: UUID?
     public let connectionID: UUID?
+    /// A folder to add to Orbit that would fix this ("Add Downloads to Orbit").
+    public let folderToAdd: String?
 
-    public init(_ severity: Severity, _ message: String, node: UUID? = nil, connection: UUID? = nil) {
+    public init(_ severity: Severity, _ message: String, node: UUID? = nil, connection: UUID? = nil, folderToAdd: String? = nil) {
         self.severity = severity
         self.message = message
         self.nodeID = node
         self.connectionID = connection
+        self.folderToAdd = folderToAdd
     }
 
     public static func == (a: ValidationIssue, b: ValidationIssue) -> Bool {
         a.severity == b.severity && a.message == b.message && a.nodeID == b.nodeID && a.connectionID == b.connectionID
+            && a.folderToAdd == b.folderToAdd
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -44,6 +48,7 @@ public enum WorkflowValidator {
     public static func validate(
         _ workflow: Workflow,
         registry: ActionRegistry,
+        fileAccess: FileAccessPolicy? = nil,
         workflowExists: (UUID) -> Bool = { _ in true }
     ) -> [ValidationIssue] {
         var issues: [ValidationIssue] = []
@@ -100,6 +105,7 @@ public enum WorkflowValidator {
             }
             issues.append(contentsOf: nodeIssues(node, registry: registry, workflow: workflow, workflowExists: workflowExists))
         }
+        if let fileAccess { issues.append(contentsOf: folderIssues(workflow, registry: registry, fileAccess: fileAccess)) }
 
         // Cycles.
         if let cycle = findCycle(nodes: workflow.steps.map(\.id), connections: connections) {
@@ -172,6 +178,51 @@ public enum WorkflowValidator {
     }
 
     // MARK: - Per node
+
+    /// Folder triggers watching, and file steps using, folders that aren't
+    /// in Orbit. Errors, so the workflow can't be turned on until they're
+    /// added: it would otherwise fail later, in the background. When one
+    /// folder to add holds another (~/Downloads and ~/Downloads/PDFs), both
+    /// suggest the outer one, so a single "Add" fixes everything.
+    static func folderIssues(_ workflow: Workflow, registry: ActionRegistry, fileAccess: FileAccessPolicy) -> [ValidationIssue] {
+        struct Use { let node: UUID; let what: String; let path: String; let folder: String; let isTrigger: Bool }
+        var uses: [Use] = []
+        for node in workflow.steps where node.isEnabled {
+            func literal(_ key: String) -> String? {
+                guard let text = node.parameters[key]?.stringValue?.trimmingCharacters(in: .whitespaces),
+                      !text.isEmpty, !text.contains("{{") else { return nil }
+                return text
+            }
+            switch node.kind {
+            case .trigger where [TriggerCatalog.fileCreated, TriggerCatalog.folderChanged].contains(node.config.triggerType ?? ""):
+                guard let folder = literal("folder"), !fileAccess.isAllowed(folder) else { break }
+                uses.append(Use(node: node.id, what: "Watches", path: folder,
+                                folder: FileAccessPolicy.folderToAuthorize(for: folder, isFolder: true), isTrigger: true))
+            case .action:
+                guard let descriptor = registry.descriptor(for: node.actionID), descriptor.permissions.contains(.fileAccess) else { break }
+                for spec in descriptor.parameters where spec.kind == .filePath || spec.kind == .folderPath {
+                    guard let path = literal(spec.key), !fileAccess.isAllowed(path) else { continue }
+                    uses.append(Use(node: node.id, what: "“\(spec.label)” is", path: path,
+                                    folder: FileAccessPolicy.folderToAuthorize(for: path, isFolder: spec.kind == .folderPath), isTrigger: false))
+                }
+            default:
+                break
+            }
+        }
+        let folders = Set(uses.map(\.folder))
+        func outermost(_ folder: String) -> String {
+            folders.filter { FileLocation.isPath(folder, inside: $0) }.min { $0.count < $1.count } ?? folder
+        }
+        var seen = Set<String>()
+        return uses.compactMap { use in
+            let add = outermost(use.folder)
+            guard seen.insert("\(use.node)|\(add)").inserted else { return nil }
+            let message = use.isTrigger
+                ? "Watches \(use.path.abbreviatedPath), which isn't in Orbit, so ATLAS can't move or change files there. Add \(add.abbreviatedPath) to Orbit."
+                : "\(use.what) \(use.path.abbreviatedPath), which isn't in a folder you've added to Orbit. Add \(add.abbreviatedPath) to Orbit."
+            return ValidationIssue(.error, message, node: use.node, folderToAdd: add)
+        }
+    }
 
     private static func nodeIssues(_ node: WorkflowStep, registry: ActionRegistry, workflow: Workflow,
                                    workflowExists: (UUID) -> Bool) -> [ValidationIssue] {

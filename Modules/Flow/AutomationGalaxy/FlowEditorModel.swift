@@ -32,6 +32,7 @@ public final class FlowEditorModel: ObservableObject {
     /// The canvas's size, for centring on a node.
     var canvasSize: CGSize = .zero
     private var dragSnapshot: Workflow?
+    private var eventTask: Task<Void, Never>?
     private let onSaved: (Workflow) -> Void
 
     public static let gridSize: CGFloat = 20
@@ -50,7 +51,25 @@ public final class FlowEditorModel: ObservableObject {
         connections = { [weak self] in self?.draft.connections ?? [] }
         live.show(live.lastRun)
         revalidate()
+        // Orbit folders changing, or a trigger failing to start, change
+        // what's wrong with this workflow.
+        let stream = core.events.stream()
+        let id = workflow.id.uuidString
+        eventTask = Task { [weak self] in
+            for await event in stream {
+                switch event.name {
+                case AtlasEvent.Name.fileAccessChanged:
+                    self?.revalidate()
+                case AtlasEvent.Name.triggerFailed, AtlasEvent.Name.workflowSaved where event.payload["workflowId"]?.stringValue == id:
+                    self?.revalidate()
+                default:
+                    continue
+                }
+            }
+        }
     }
+
+    deinit { eventTask?.cancel() }
 
     public var isDirty: Bool { draft != saved }
     public var registry: ActionRegistry { core.registry }
@@ -129,7 +148,20 @@ public final class FlowEditorModel: ObservableObject {
     }
 
     func revalidate() {
-        issues = core.validate(draft)
+        var found = core.validate(draft)
+        // A trigger that's on but couldn't start says why (unless a folder
+        // problem on it already does).
+        if saved.isEnabled, let triggers = core.triggers {
+            for node in draft.triggerNodes where !found.contains(where: { $0.nodeID == node.id && $0.folderToAdd != nil }) {
+                if let problem = triggers.problem(for: node.id) { found.append(ValidationIssue(.warning, problem, node: node.id)) }
+            }
+        }
+        issues = found
+    }
+
+    /// "Add Downloads to Orbit": the app opens the folder picker there.
+    func addFolderToOrbit(_ folder: String) {
+        NotificationCenter.default.post(name: .atlasAddFolderToOrbit, object: folder)
     }
 
     public func updateNode(_ id: UUID, _ name: String = "Edit Step", _ change: (inout WorkflowStep) -> Void) {

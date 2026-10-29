@@ -348,6 +348,17 @@ public final class OrbitViewModel: ObservableObject {
         }
     }
 
+    /// "Add Downloads to Orbit": the folder picker, opened at the folder
+    /// (choosing it is the permission). True if it was added.
+    @discardableResult
+    public func addFolderToOrbit(_ path: String) -> Bool {
+        let folder = FileAccessPolicy.folderToAuthorize(for: path, isFolder: true)
+        guard let url = Self.chooseFolder(prompt: "Add to Orbit", startingAt: folder) else { return false }
+        let before = locations.count
+        addFolder(url)
+        return locations.count != before || module.core.fileAccess.isAllowed(path)
+    }
+
     public func removeLocation(_ location: FileLocation) {
         module.locations.remove(location.id)
         reload()

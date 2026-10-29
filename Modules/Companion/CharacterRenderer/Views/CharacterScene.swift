@@ -24,6 +24,8 @@ final class CharacterScene {
     private var floatController: AnimationPlaybackController?
     private var spinController: AnimationPlaybackController?
     private var built: (source: CharacterSource, look: String)?
+    /// The open book held while reading.
+    private var heldBook: Entity?
     private var lastPresentation: CharacterPresentation?
 
     init() {
@@ -250,6 +252,31 @@ final class CharacterScene {
             }
         }
         if presentation.gesture != previous?.gesture { perform(presentation.gesture) }
+        if presentation.isReading != (previous?.isReading ?? false) || heldBook?.parent == nil && presentation.isReading {
+            setReading(presentation.isReading)
+        }
+    }
+
+    /// Holds a small open book in front, head bowed over it.
+    private func setReading(_ reading: Bool) {
+        heldBook?.removeFromParent()
+        heldBook = nil
+        turn.orientation = simd_quatf(angle: reading ? 0.16 : 0, axis: [1, 0, 0])
+        guard reading else { return }
+        let book = Entity()
+        let cover = SimpleMaterial(color: NSColor(srgbRed: 0.49, green: 0.23, blue: 0.27, alpha: 1), roughness: 0.6, isMetallic: false)
+        let paper = SimpleMaterial(color: NSColor(white: 0.96, alpha: 1), roughness: 0.9, isMetallic: false)
+        book.addChild(ModelEntity(mesh: .generateBox(width: 0.66, height: 0.03, depth: 0.44, cornerRadius: 0.01), materials: [cover]))
+        for x: Float in [-0.16, 0.16] {
+            let page = ModelEntity(mesh: .generateBox(width: 0.3, height: 0.05, depth: 0.4), materials: [paper])
+            page.position = [x, 0.035, 0]
+            page.orientation = simd_quatf(angle: x < 0 ? 0.08 : -0.08, axis: [0, 0, 1])
+            book.addChild(page)
+        }
+        book.position = [0, -0.28, 0.62]
+        book.orientation = simd_quatf(angle: 1.05, axis: [1, 0, 0])
+        float.addChild(book)
+        heldBook = book
     }
 
     private func perform(_ gesture: CharacterPresentation.Gesture) {

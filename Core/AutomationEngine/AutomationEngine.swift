@@ -197,6 +197,74 @@ public actor AutomationEngine {
         return await run(workflow, trigger: source, approvedIn: approvedIn)
     }
 
+    /// Runs the steps that failed in `runID` again, as a new run of the
+    /// same workflow (as it is now), with the inputs they had then. Steps
+    /// that worked aren't repeated: their results carry over, so the steps
+    /// after a failed one (skipped because of it) run too. File steps are
+    /// safe to repeat: they check the file is still there first.
+    ///
+    /// Returns nil when there's nothing to retry.
+    public func retryFailedSteps(of runID: UUID) async -> WorkflowRun? {
+        guard let old = try? store?.run(id: runID), let workflow = try? store?.workflow(id: old.workflowID) else { return nil }
+        let failed = old.steps.filter { $0.state == .failed && workflow.step(id: $0.nodeID) != nil }
+        guard !failed.isEmpty else { return nil }
+        let newID = UUID()
+        activeWorkflowIDs[newID] = workflow.id
+        let task = Task { () -> WorkflowRun in
+            defer {
+                activeRuns[newID] = nil
+                activeWorkflowIDs[newID] = nil
+            }
+            return await executeRetry(workflow, of: old, failed: failed.map(\.nodeID), runID: newID)
+        }
+        activeRuns[newID] = task
+        return await task.value
+    }
+
+    private func executeRetry(_ workflow: Workflow, of old: WorkflowRun, failed: [UUID], runID: UUID) async -> WorkflowRun {
+        let ctx = RunContext(
+            workflow: workflow,
+            run: WorkflowRun(
+                id: runID, workflowID: workflow.id, workflowName: workflow.name, trigger: RunTrigger.retry, state: .running,
+                startedAt: Date(),
+                steps: workflow.steps.enumerated().map { position, step in
+                    StepRecord(position: position, nodeID: step.id, actionID: step.actionID, label: label(for: step), kind: step.kind)
+                },
+                triggerPayload: old.triggerPayload
+            ),
+            callStack: [workflow.id]
+        )
+        if isPaused { return finish(ctx, state: .skipped, error: "Automations are paused.") }
+
+        // What worked last time carries over, outputs and all.
+        for record in old.steps where record.state == .succeeded || record.state == .partiallySucceeded {
+            guard let index = ctx.index[record.nodeID] else { continue }
+            ctx.run.steps[index].state = record.state
+            ctx.run.steps[index].message = "Done in the earlier run"
+            ctx.run.steps[index].inputs = record.inputs
+            ctx.run.steps[index].output = record.output
+            ctx.run.steps[index].startedAt = record.startedAt
+            ctx.run.steps[index].finishedAt = record.finishedAt
+            ctx.outputs[record.nodeID] = record.kind == .trigger ? old.triggerPayload : record.output
+        }
+        for record in old.steps where failed.contains(record.nodeID) {
+            ctx.inputOverrides[record.nodeID] = record.inputs
+        }
+        ctx.variables = initialVariables(for: workflow)
+        persist(ctx.run)
+        var started = payload(for: ctx.run)
+        started["retryOf"] = .string(old.id.uuidString)
+        events.publish(AtlasEvent(AtlasEvent.Name.workflowStarted, payload: started))
+
+        for nodeID in failed {
+            // An earlier retried step may already have reached this one.
+            guard let index = ctx.index[nodeID], ctx.run.steps[index].state == .pending else { continue }
+            let result = await runChain(from: nodeID, ctx: ctx, scope: Scope())
+            if case .stopped = result { break }
+        }
+        return conclude(ctx)
+    }
+
     // MARK: - Execution
 
     private func execute(
@@ -252,6 +320,11 @@ public actor AutomationEngine {
             if case .stopped = result { break }
         }
 
+        return (conclude(ctx), ctx.variables)
+    }
+
+    /// Marks what didn't run, works out the run's state and finishes it.
+    private func conclude(_ ctx: RunContext) -> WorkflowRun {
         // Whatever didn't run.
         let leftover: String
         let leftoverState: RunState
@@ -287,7 +360,7 @@ public actor AutomationEngine {
         let firstError = (failures.first ?? partials.first).map { "\($0.label): \($0.error ?? "failed")" }
         let error = ctx.canceled ? "Run was canceled." : (ctx.fatalError ?? firstError)
         persistSavedVariables(ctx)
-        return (finish(ctx, state: state, error: error), ctx.variables)
+        return finish(ctx, state: state, error: error)
     }
 
     /// Where a run begins: the trigger that fired, or the start node(s).
@@ -416,6 +489,8 @@ public actor AutomationEngine {
 
     /// Typed-in parameters, overridden by data connections, with templates filled.
     private func resolveInputs(of node: WorkflowStep, ctx: RunContext, scope: Scope) -> ActionParameters {
+        // A retried step gets exactly what it had the first time.
+        if let inputs = ctx.inputOverrides.removeValue(forKey: node.id) { return inputs }
         var values = node.parameters
         for connection in ctx.incomingData[node.id, default: []] {
             if let value = ctx.outputs[connection.fromNode]?[connection.fromPort] {
@@ -526,6 +601,10 @@ public actor AutomationEngine {
         let timeout = max(0.1, step.timeout ?? descriptor.defaultTimeout)
         let maxAttempts = descriptor.isIdempotent ? 1 + min(max(0, step.maxRetries), Self.maxRetries) : 1
         let context = ActionContext(system: system, events: events, runID: ctx.run.id, files: files)
+        // The Orbit folders these paths are in, for security-scoped access.
+        let paths = descriptor.permissions.contains(.fileAccess)
+            ? descriptor.parameters.filter { $0.kind == .filePath || $0.kind == .folderPath }.compactMap { parameters[$0.key]?.stringValue }
+            : []
 
         var lastError: Error = ActionError.failed("Did not run.")
         for attempt in 1...maxAttempts {
@@ -533,8 +612,10 @@ public actor AutomationEngine {
                 return StepOutcome(state: .canceled, attempts: attempt - 1, message: "Run was canceled.")
             }
             do {
-                let output = try await withTimeout(seconds: timeout) {
-                    try await action.perform(parameters, context: context)
+                let output = try await withTimeout(seconds: timeout) { [files] in
+                    try await files.access.withAccess(to: paths) {
+                        try await action.perform(parameters, context: context)
+                    }
                 }
                 let approval = descriptor.confirmationRequired ? preapproved[ctx.run.id].map { " (approved in \($0))" } ?? "" : ""
                 return StepOutcome(
@@ -905,6 +986,8 @@ private final class RunContext: @unchecked Sendable {
     var canceled = false
     /// Failed nodes an error handler dealt with.
     var caught = Set<UUID>()
+    /// Inputs for steps being retried, from the earlier run.
+    var inputOverrides: [UUID: ActionParameters] = [:]
 
     init(workflow: Workflow, run: WorkflowRun, callStack: [UUID]) {
         self.workflow = workflow

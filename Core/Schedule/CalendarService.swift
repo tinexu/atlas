@@ -219,6 +219,15 @@ public final class CalendarService: @unchecked Sendable {
         return calendarStore.events(from: range.start, to: range.end, calendarIDs: visible).filter { !$0.isAllDay }
     }
 
+    /// Events from the given calendars plus the visible ones, all-day ones
+    /// included (school feeds often post deadlines as all-day events).
+    public func allEvents(in range: DateInterval, alsoFrom calendarIDs: [String]) -> [CalendarEvent] {
+        guard isReadable else { return [] }
+        let ids = Array(Set(settings.visibleCalendarIDs + calendarIDs))
+        guard !ids.isEmpty else { return [] }
+        return calendarStore.events(from: range.start, to: range.end, calendarIDs: ids)
+    }
+
     /// Events as read-only timeline blocks. ATLAS's own written events are
     /// left out: their ATLAS block already shows.
     public func blocks(in range: DateInterval) -> [ScheduleBlock] {

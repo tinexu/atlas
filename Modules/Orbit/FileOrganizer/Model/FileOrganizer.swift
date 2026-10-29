@@ -160,9 +160,12 @@ public final class FileOrganizer: @unchecked Sendable {
             }
             let step = RulePlanner.plan(rule.action, path: path, rule: rule, ifExists: rule.ifExists, system: system)
             let allowed = core.fileAccess.isAllowed(path)
+            let destinationAllowed = step.destination.map(core.fileAccess.isAllowed) ?? true
             let outcome: String
             if !allowed {
                 outcome = "Can't change: \(((path as NSString).deletingLastPathComponent).abbreviatedPath) isn't an Orbit folder"
+            } else if !destinationAllowed, let destination = step.destination {
+                outcome = "Can't change: \(((destination as NSString).deletingLastPathComponent).abbreviatedPath) isn't in an Orbit folder"
             } else if !competing.isEmpty {
                 outcome = "Review: also matches " + competing.map { "“\($0.name)”" }.joined(separator: ", ")
             } else if rule.effectiveMode == .askFirst {

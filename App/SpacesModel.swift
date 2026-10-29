@@ -61,6 +61,10 @@ final class SpacesModel: ObservableObject {
     var onError: ((String) -> Void)?
     /// Asks "Lock in for how long?" for a profile that uses lockdown.
     var onLockdownPrompt: ((LockdownModel.PendingStart) -> Void)?
+    /// What the Study Library room shows (courses and more).
+    var studyState: (() -> StudyRoomState?)?
+    /// Handles a Study Library object click; returns whether it did.
+    var studyObjectClicked: ((SpaceObject) -> Bool)?
     private var eventTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
 
@@ -180,7 +184,8 @@ final class SpacesModel: ObservableObject {
                 room: template(for: space).room,
                 objects: objects(for: space.id),
                 status: status(for: space.id),
-                isActive: activeSpaceID == space.id
+                isActive: activeSpaceID == space.id,
+                study: space.templateID == StudyLibrary.templateID ? studyState?() : nil
             )
         }
     }
@@ -284,6 +289,8 @@ final class SpacesModel: ObservableObject {
     /// A click on an object in the 3D room: run it if it does something,
     /// otherwise offer to assign something.
     func objectClicked(_ object: SpaceObject) {
+        // The Study Library's chalkboard and desk calendar have their own clicks.
+        if space(id: object.spaceID)?.templateID == StudyLibrary.templateID, studyObjectClicked?(object) == true { return }
         if object.hasAssignment {
             run(object)
         } else {

@@ -94,10 +94,16 @@ private struct RuleRow: View {
                 Text(rule.summary).font(.callout).foregroundStyle(.secondary)
                 Text("Watches " + rule.folders.map(\.abbreviatedPath).joined(separator: ", ")).font(.caption).foregroundStyle(.tertiary)
                 ForEach(unauthorized, id: \.self) { folder in
-                    Label("\(folder.abbreviatedPath) isn't an Orbit folder, so files there can't be changed. Add it in Folders.",
-                          systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    HStack(spacing: 8) {
+                        Label("\(folder.abbreviatedPath) isn't an Orbit folder, so this rule isn't watching it.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                        Button("Add \(FileLocation.displayName(for: FileAccessPolicy.folderToAuthorize(for: folder, isFolder: true))) to Orbit") {
+                            model.addFolderToOrbit(folder)
+                        }
+                        .controlSize(.small)
+                    }
                 }
                 ForEach(rule.problems, id: \.self) { problem in
                     Label(problem, systemImage: "exclamationmark.octagon").font(.caption).foregroundStyle(.red)
@@ -124,7 +130,7 @@ private struct RuleRow: View {
     }
 
     private var unauthorized: [String] {
-        rule.folders.filter { folder in !model.locations.contains { $0.contains(FileLocation.normalize(folder)) } }
+        rule.folders.filter { !model.module.core.fileAccess.isAllowed($0) }
     }
 }
 

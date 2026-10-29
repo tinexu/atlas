@@ -39,7 +39,7 @@ public final class AtlasCore: @unchecked Sendable {
         events: EventBus = EventBus()
     ) {
         let permissions = PermissionManager(provider: permissionProvider, store: store)
-        let fileAccess = FileAccessPolicy(roots: ((try? store.locations()) ?? []).map(\.path))
+        let fileAccess = FileAccessPolicy(locations: (try? store.locations()) ?? [])
         let fileLog = FileOperationLog(store: store, events: events)
         self.fileAccess = fileAccess
         self.fileLog = fileLog
@@ -99,9 +99,12 @@ public final class AtlasCore: @unchecked Sendable {
     }
     #endif
 
-    /// Call after adding or removing an Orbit location.
+    /// Call after adding or removing an Orbit location. Folder triggers
+    /// start (or stop) watching, and open editors revalidate.
     public func refreshFileAccess() {
-        fileAccess.setRoots(((try? store.locations()) ?? []).map(\.path))
+        fileAccess.setLocations((try? store.locations()) ?? [])
+        triggers?.fileAccessChanged()
+        events.publish(AtlasEvent(AtlasEvent.Name.fileAccessChanged))
     }
 
     // MARK: - Workflow management
@@ -111,14 +114,14 @@ public final class AtlasCore: @unchecked Sendable {
     public func startTriggers(environment: TriggerEnvironment) {
         guard triggers == nil else { return }
         let manager = TriggerManager(store: store, engine: engine, events: events, environment: environment,
-                                     system: system, registry: registry)
+                                     system: system, registry: registry, fileAccess: fileAccess)
         triggers = manager
         manager.start()
     }
 
     /// Problems that would stop this workflow running correctly.
     public func validate(_ workflow: Workflow) -> [ValidationIssue] {
-        WorkflowValidator.validate(workflow, registry: registry) { [store] id in
+        WorkflowValidator.validate(workflow, registry: registry, fileAccess: fileAccess) { [store] id in
             (try? store.workflow(id: id)) != nil
         }
     }
@@ -126,7 +129,8 @@ public final class AtlasCore: @unchecked Sendable {
     /// Saves a workflow, stamping `updatedAt`, and announces the change.
     ///
     /// A workflow with triggers and validation errors is saved as a draft:
-    /// turned off, so it can't start on its own until it's fixed.
+    /// turned off, so it can't start on its own until it's fixed. The
+    /// editor also won't turn one on while a folder it uses isn't in Orbit.
     @discardableResult
     public func save(_ workflow: Workflow) throws -> Workflow {
         var saved = workflow
@@ -136,7 +140,9 @@ public final class AtlasCore: @unchecked Sendable {
             saved.connections = saved.effectiveConnections
         }
         NodePorts.refresh(&saved, registry: registry)
-        if saved.hasTriggers && saved.isEnabled && WorkflowValidator.hasErrors(validate(saved)) {
+        // A folder that isn't in Orbit yet doesn't turn it off: its trigger
+        // stays idle (and says why) until the folder is added.
+        if saved.hasTriggers && saved.isEnabled && WorkflowValidator.hasErrors(validate(saved).filter { $0.folderToAdd == nil }) {
             saved.isEnabled = false
         }
         try store.saveWorkflow(saved)

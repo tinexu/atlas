@@ -52,6 +52,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>ATLAS shows your calendar events on the Time Architect timeline and suggests the right Space before they start. It only changes a calendar if you allow writing to it.</string>
     <key>NSCalendarsUsageDescription</key>
     <string>ATLAS shows your calendar events on the Time Architect timeline.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>ATLAS reads the Reminders list you choose for the Study Library's assignments, and marks a reminder complete when you check it off in the room. It never changes anything else.</string>
+    <key>NSRemindersUsageDescription</key>
+    <string>ATLAS reads the Reminders list you choose as assignments for the Study Library.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>ATLAS sends commands to apps you include in your automations, such as telling Terminal which folder to open.</string>
 </dict>

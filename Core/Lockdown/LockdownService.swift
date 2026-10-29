@@ -43,14 +43,11 @@ public final class LockdownService: @unchecked Sendable {
     private var current: LockdownSession?
     private var tokens: [TriggerToken] = []
     private var endTimer: TriggerToken?
-    private var focusSubscription: EventBus.Subscription?
     private var lastToast: [String: Date] = [:]
     private var lastAttempt: [String: Date] = [:]
     private var lastAllowed: String?
-    /// The focus-timer session lockdown is starting or stopping right now.
-    private var transientPhaseID: UUID?
-    private var startingPhase = false
-    private var skipping = false
+    /// The pomodoro rhythm, on the focus timer.
+    private var cycle: PomodoroCycle?
     private var _lastSummary: LockdownSummary?
     /// The lockdown `load()` found on disk, which `resume()` picks up.
     private var loadedID: UUID?
@@ -65,12 +62,6 @@ public final class LockdownService: @unchecked Sendable {
         self.focus = focus
         self.ownBundleID = ownBundleID
         _lastSummary = try? store.preference(Self.summaryKey, as: LockdownSummary.self)
-        focus.isManaged = { [weak self] id in self?.manages(id) ?? false }
-        focusSubscription = events.subscribe(AtlasEvent.Name.focusEnded) { [weak self] event in self?.focusEnded(event) }
-    }
-
-    deinit {
-        if let focusSubscription { events.unsubscribe(focusSubscription) }
     }
 
     public var session: LockdownSession? { lock.withLock { current } }
@@ -170,7 +161,7 @@ public final class LockdownService: @unchecked Sendable {
         }
         observe()
         scheduleEnd()
-        startPhase(.focus, announce: false)
+        makeCycle(for: session).start(.focus)
         if let shortcut = settings.shortcutOnStart, !shortcut.isEmpty { runShortcut(shortcut) }
         publish(AtlasEvent.Name.lockdownStarted)
         return self.session
@@ -227,106 +218,56 @@ public final class LockdownService: @unchecked Sendable {
     // MARK: - Pomodoro
 
     public func pausePhase() {
-        guard let id = session?.phase.sessionID, focus.session?.id == id else { return }
-        focus.pause()
+        cycle?.pause()
         publish(AtlasEvent.Name.lockdownChanged)
     }
 
     /// Resumes a paused phase, or starts the current one again after it was stopped.
     public func resumePhase() {
-        guard let session else { return }
-        if let id = session.phase.sessionID, focus.session?.id == id {
-            focus.resume()
-            publish(AtlasEvent.Name.lockdownChanged)
-        } else {
-            startPhase(session.phase.kind, announce: false)
-        }
+        cycle?.resume()
+        publish(AtlasEvent.Name.lockdownChanged)
     }
 
     public func skipPhase() {
-        guard let session else { return }
-        if let id = session.phase.sessionID, focus.session?.id == id {
-            lock.withLock { skipping = true }
-            focus.stop()
-        } else {
-            advance()
-        }
+        cycle?.skip()
     }
 
-    private func phaseMinutes(_ kind: LockdownSession.Phase.Kind, _ settings: PomodoroSettings) -> Int {
-        switch kind {
-        case .focus: return settings.focusMinutes
-        case .shortBreak: return settings.shortBreakMinutes
-        case .longBreak: return settings.longBreakMinutes
+    /// The pomodoro for `session`: phases capped to lockdown's time left,
+    /// saved with the session, announced, and re-locking after a break
+    /// that let other apps out.
+    @discardableResult
+    private func makeCycle(for session: LockdownSession) -> PomodoroCycle {
+        let cycle = PomodoroCycle(focus: focus, events: events, titlePrefix: "Lockdown", settings: session.settings.pomodoro,
+                                  phase: session.phase, spaceID: session.spaceID)
+        cycle.limit = { [weak self] _ in
+            guard let self, let session = self.session else { return 0 }
+            return session.remaining(at: self.environment.now())
         }
+        cycle.onChange = { [weak self] phase in self?.mutate { $0.phase = phase } }
+        cycle.onStopped = { [weak self] in self?.publish(AtlasEvent.Name.lockdownChanged) }
+        cycle.onPhase = { [weak self] previous, kind, minutes, announce in
+            self?.phaseBegan(from: previous, to: kind, minutes: minutes, announce: announce)
+        }
+        lock.withLock { self.cycle = cycle }
+        return cycle
     }
 
-    private func startPhase(_ kind: LockdownSession.Phase.Kind, announce: Bool) {
+    private func phaseBegan(from previous: PomodoroPhase.Kind, to kind: PomodoroPhase.Kind, minutes: Double, announce: Bool) {
         guard let session else { return }
-        let wasBreak = session.phase.isBreak
-        let remaining = session.remaining(at: environment.now()) / 60
-        let minutes = min(Double(phaseMinutes(kind, session.settings.pomodoro)), max(1, remaining))
-        let title = kind == .focus ? "Lockdown · Focus" : "Lockdown · \(LockdownSession.Phase(kind: kind, completedFocus: 0).title)"
-        lock.withLock { startingPhase = true }
-        let phaseSession = focus.start(minutes: minutes, title: title, spaceID: session.spaceID, onTimeline: kind == .focus)
-        lock.withLock { startingPhase = false }
-        mutate {
-            $0.phase.kind = kind
-            $0.phase.sessionID = phaseSession.id
-        }
         events.publish(AtlasEvent(AtlasEvent.Name.lockdownPhase, payload: [
             "phase": .string(kind.rawValue), "minutes": .number(minutes), "announce": .bool(announce),
         ]))
+        let unlocks = session.settings.pomodoro.unlockDuringBreaks
         if announce {
-            let body = kind == .focus ? "Back to focus for \(Int(minutes)) min." : "Take \(Int(minutes)) min. Other apps stay locked."
-            let unlocked = kind != .focus && session.settings.pomodoro.unlockDuringBreaks
+            let body = kind == .focus ? "Back to focus for \(Int(minutes)) min."
+                : unlocks ? "Take \(Int(minutes)) min. Other apps are unlocked until it ends."
+                : "Take \(Int(minutes)) min. Other apps stay locked."
             let system = self.system
-            Task { try? await system.postNotification(title: kind == .focus ? "Focus" : "Break time",
-                                                      body: unlocked ? "Take \(Int(minutes)) min. Other apps are unlocked until it ends." : body) }
+            Task { try? await system.postNotification(title: kind == .focus ? "Focus" : "Break time", body: body) }
         }
         // Back from a break that let other apps out: lock them away again.
-        if kind == .focus, wasBreak, session.settings.pomodoro.unlockDuringBreaks {
+        if kind == .focus, previous != .focus, unlocks {
             Task { _ = await hideOthers(includingFinder: false) }
-        }
-    }
-
-    private func advance() {
-        guard let session else { return }
-        let every = max(1, session.settings.pomodoro.longBreakEvery)
-        var next = LockdownSession.Phase.Kind.focus
-        var completed = session.phase.completedFocus
-        if session.phase.kind == .focus {
-            completed += 1
-            next = completed % every == 0 ? .longBreak : .shortBreak
-        }
-        mutate {
-            $0.phase.completedFocus = completed
-            $0.phase.sessionID = nil
-        }
-        // Not worth a new phase in the last half minute.
-        guard session.remaining(at: environment.now()) > 30 else { return }
-        startPhase(next, announce: true)
-    }
-
-    private func manages(_ id: UUID) -> Bool {
-        lock.withLock { startingPhase || transientPhaseID == id || current?.phase.sessionID == id }
-    }
-
-    private func focusEnded(_ event: AtlasEvent) {
-        guard let id = event.payload["sessionId"]?.stringValue.flatMap(UUID.init(uuidString:)),
-              let session, session.phase.sessionID == id
-        else { return }
-        let completed = event.payload["completed"]?.boolValue ?? false
-        let skipped = lock.withLock { () -> Bool in
-            defer { skipping = false }
-            return skipping
-        }
-        if completed || skipped {
-            advance()
-        } else {
-            // Stopped from elsewhere (e.g. the menu bar): the pomodoro waits for Start.
-            mutate { $0.phase.sessionID = nil }
-            publish(AtlasEvent.Name.lockdownChanged)
         }
     }
 
@@ -497,11 +438,11 @@ public final class LockdownService: @unchecked Sendable {
         }) else { return nil }
         stopObserving()
         // Its pomodoro phase is ours: stop it without the focus timer's own wrap-up.
-        if let id = session.phase.sessionID, focus.session?.id == id {
-            lock.withLock { transientPhaseID = id }
-            focus.stop()
-            lock.withLock { transientPhaseID = nil }
+        let cycle = lock.withLock { () -> PomodoroCycle? in
+            defer { self.cycle = nil }
+            return self.cycle
         }
+        cycle?.stop()
         let now = environment.now()
         var counts: [String: Int] = [:]
         for (bundleID, count) in session.blocked { counts[session.name(of: bundleID), default: 0] += count }
@@ -541,6 +482,8 @@ public final class LockdownService: @unchecked Sendable {
             lastAllowed = saved.allowed.first
             loadedID = saved.id
         }
+        // Owns its phase before the focus timer restores it.
+        makeCycle(for: saved)
     }
 
     /// Resumes a loaded lockdown if time remains, or ends it cleanly.
@@ -558,10 +501,9 @@ public final class LockdownService: @unchecked Sendable {
         observe()
         scheduleEnd()
         if session.isEnforcing { _ = await hideOthers(includingFinder: false) }
-        if let id = self.session?.phase.sessionID, focus.session?.id == id {
-            // The phase is still running on the focus timer.
-        } else if let kind = self.session?.phase.kind {
-            startPhase(kind, announce: false)
+        // Restart the phase unless it's still running on the focus timer.
+        if let cycle = lock.withLock({ self.cycle }), cycle.currentSession == nil {
+            cycle.start()
         }
         publish(AtlasEvent.Name.lockdownStarted)
     }

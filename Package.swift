@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "AtlasOrbitUI", targets: ["AtlasOrbitUI"]),
         .library(name: "AtlasCompanion", targets: ["AtlasCompanion"]),
         .library(name: "AtlasCompanionUI", targets: ["AtlasCompanionUI"]),
+        .library(name: "AtlasStudy", targets: ["AtlasStudy"]),
     ],
     targets: [
         // Headless foundation: event bus, action registry, permissions,
@@ -98,16 +99,24 @@ let package = Package(
                       "CharacterRenderer/Model"],
             sources: ["CharacterRenderer/Views", "DesktopOverlay/Views", "CommandInterface/Views", "Settings"]
         ),
+        // Study Library: courses, assignments, study sessions and their
+        // automations. Headless; the room draws from `StudyRoomState`
+        // (AtlasSpaces) and everything it does runs through the engine.
+        .target(
+            name: "AtlasStudy",
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit"],
+            path: "Modules/Study"
+        ),
         // Native SwiftUI shell.
         .executableTarget(
             name: "ATLAS",
             dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow", "AtlasOrbit", "AtlasOrbitUI",
-                           "AtlasCompanion", "AtlasCompanionUI"],
+                           "AtlasCompanion", "AtlasCompanionUI", "AtlasStudy"],
             path: "App"
         ),
         .testTarget(
             name: "AtlasCoreTests",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasOrbit", "AtlasCompanion"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasOrbit", "AtlasCompanion", "AtlasStudy", "AtlasFlow"],
             // Unit tests and cross-module integration tests share the mocks.
             path: "Tests",
             sources: ["Unit", "Integration"]

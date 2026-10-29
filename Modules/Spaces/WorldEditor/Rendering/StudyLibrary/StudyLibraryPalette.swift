@@ -62,6 +62,8 @@ public struct StudyLibraryPalette: Equatable, Sendable {
 enum LibraryMaterial: Hashable {
     case wall, wainscot, forest, walnut, oak, brass, paper, leather, leatherBrown, velvet, knit, glass, shade
     case lampGlow, flame, bulb, moon, sky, rain, steam, ceramic, leaf
+    /// Brass letters and bands on the course books, faintly lit so they read.
+    case brassLabel
     case paint(String)
 }
 
@@ -127,6 +129,7 @@ struct StudyLibraryMaterials {
         table[.steam] = translucent("#FFFFFF", opacity: 0.3)
         table[.ceramic] = pbr(palette.cream, roughness: 0.35, clearcoat: 0.6)
         table[.leaf] = pbr(palette.deepSage, roughness: 0.8)
+        table[.brassLabel] = Self.emissive(palette.brass, intensity: 0.35)
         for hex in palette.spines + [palette.forest, palette.sageWall, palette.lightOak, palette.walnut] {
             table[.paint(hex)] = pbr(hex, roughness: 0.7)
         }
@@ -134,7 +137,15 @@ struct StudyLibraryMaterials {
     }
 
     func material(_ key: LibraryMaterial) -> any RealityKit.Material {
-        table[key] ?? table[.paper]!
+        if let material = table[key] { return material }
+        // Any other colour (e.g. a course's own): made on demand.
+        if case .paint(let hex) = key {
+            var material = PhysicallyBasedMaterial()
+            material.baseColor = .init(tint: NSColor(atlasHex: hex))
+            material.roughness = 0.7
+            return material
+        }
+        return table[.paper]!
     }
 
     /// A warm glowing surface; also used to fade the lamp and chandelier.

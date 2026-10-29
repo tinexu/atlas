@@ -300,6 +300,8 @@ public enum RunTrigger {
     public static let subworkflow = "subworkflow"
     /// A command the person confirmed in the Companion (Stage 06).
     public static let companion = "companion"
+    /// "Retry failed steps" in Run History or the Companion's bubble.
+    public static let retry = "retry"
     /// Prefix of runs started by a trigger node.
     public static let automaticPrefix = "trigger."
 
@@ -307,6 +309,6 @@ public enum RunTrigger {
 
     /// Runs a person started explicitly; they run even if the workflow is off.
     public static func isExplicit(_ trigger: String) -> Bool {
-        trigger == manual || trigger == test || trigger == companion
+        trigger == manual || trigger == test || trigger == companion || trigger == retry
     }
 }

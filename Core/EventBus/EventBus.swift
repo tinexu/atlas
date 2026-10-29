@@ -99,3 +99,16 @@ public final class EventBus: @unchecked Sendable {
         return pattern == name
     }
 }
+
+extension AtlasEvent.Name {
+    /// Something for the Companion to offer, from any module. Payload:
+    /// message, button, actionId, and the action's parameters as `param.<key>`.
+    public static let companionOffer = "companion.offer"
+    /// A study session started, paused, resumed or moved to a new pomodoro
+    /// phase. Payload: sessionId (empty when none), phase ("focus",
+    /// "shortBreak", "longBreak"), announce. The Companion reads quietly
+    /// through focus phases.
+    public static let studySessionChanged = "study.session.changed"
+    /// Payload: sessionId, headline, early.
+    public static let studySessionEnded = "study.session.ended"
+}

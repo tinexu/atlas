@@ -41,8 +41,9 @@ public enum RoomBuilder {
     /// `detail: false` asks for a lighter room where the template has one
     /// (the hand-built rooms' miniatures); other rooms ignore it.
     public static func build(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool = true,
-                             reduceMotion: Bool = false) -> Entity {
-        if let diorama = buildDiorama(space: space, room: room, objects: objects, detail: detail, reduceMotion: reduceMotion) {
+                             reduceMotion: Bool = false, study: StudyRoomState? = nil) -> Entity {
+        if let diorama = buildDiorama(space: space, room: room, objects: objects, detail: detail, reduceMotion: reduceMotion,
+                                      study: study) {
             return diorama
         }
         let accent = NSColor(atlasHex: space.accentColor)
@@ -80,7 +81,8 @@ public enum RoomBuilder {
     /// The hand-built rooms draw their own shell and props, which stand in
     /// for the Space's objects by role. Objects with an action but no prop
     /// are drawn as usual where they're stored.
-    static func buildDiorama(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool, reduceMotion: Bool) -> Entity? {
+    static func buildDiorama(space: Space, room: RoomLayout, objects: [SpaceObject], detail: Bool, reduceMotion: Bool,
+                             study: StudyRoomState? = nil) -> Entity? {
         let entity: Entity, motion: any RoomMotion, footprint: Footprint, loose: [SpaceObject]
         switch space.templateID {
         case CreativeLoft.templateID:
@@ -88,7 +90,7 @@ public enum RoomBuilder {
             (entity, footprint, loose) = (loft.entity, .loft, CreativeLoft.assign(objects).loose)
             motion = CreativeLoftMotion(parts: loft.parts, reduceMotion: reduceMotion)
         case StudyLibrary.templateID:
-            let library = StudyLibraryBuilder.build(objects: objects, detail: detail)
+            let library = StudyLibraryBuilder.build(objects: objects, detail: detail, study: study ?? StudyRoomState())
             (entity, footprint, loose) = (library.entity, .library, StudyLibrary.assign(objects).loose)
             motion = StudyLibraryMotion(parts: library.parts, reduceMotion: reduceMotion)
         case CodingLab.templateID:
@@ -187,13 +189,19 @@ public enum RoomBuilder {
         var rest: SIMD3<Float>
     }
 
+    /// How far an object moves when hovered (default: lifts 1 cm).
+    struct HoverOffsetComponent: Component {
+        var offset: SIMD3<Float>
+    }
+
     /// Lifts an object 1 cm and draws a rose outline around it, or puts it
     /// back. The outline is made on first hover, so rooms don't pay for it.
     /// Under Reduce Motion it only glows.
     public static func setHovered(_ object: Entity, _ hovered: Bool, lift: Bool = true) {
         let rest = object.components[HoverComponent.self]?.rest ?? object.position
         object.components.set(HoverComponent(rest: rest))
-        object.position = hovered && lift ? rest + [0, 0.01, 0] : rest
+        let offset = object.components[HoverOffsetComponent.self]?.offset ?? [0, 0.01, 0]
+        object.position = hovered && lift ? rest + offset : rest
         if hovered, object.findEntity(named: "hoverGlow") == nil, let glow = outline(of: object) {
             object.addChild(glow)
         }

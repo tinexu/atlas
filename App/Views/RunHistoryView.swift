@@ -1,3 +1,4 @@
+import AtlasCompanion
 import AtlasCore
 import AtlasFlow
 import SwiftUI
@@ -83,6 +84,8 @@ private struct RunDetail: View {
     let run: WorkflowRun
     @State private var showGraph = true
     @State private var explanation: String?
+    /// Redraws the buttons once a folder is added.
+    @State private var folderAdded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -110,6 +113,28 @@ private struct RunDetail: View {
         }
     }
 
+    /// "Add Downloads to Orbit" when a step failed on a folder that isn't
+    /// in Orbit, and "Retry failed steps" for any run with failed steps.
+    @ViewBuilder
+    private var fixButtons: some View {
+        let _ = folderAdded
+        if let core = model.core, run.state != .running {
+            let failed = run.steps.filter { $0.state == .failed }
+            if let folder = failed.lazy.compactMap({ FailureExplainer.folderToAuthorize($0, fileAccess: core.fileAccess) }).first {
+                Button("Add \(FileLocation.displayName(for: folder)) to Orbit") {
+                    model.addFolderToOrbit(folder)
+                    folderAdded.toggle()
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Opens the folder picker at \(folder.abbreviatedPath). Choosing it lets ATLAS change files there.")
+            }
+            if !failed.isEmpty, model.workflow(id: run.workflowID) != nil {
+                Button("Retry Failed Steps") { model.retryFailedSteps(of: run) }
+                    .help("Runs only the steps that failed (and the ones after them) again, with the same files. Steps that worked aren't repeated.")
+            }
+        }
+    }
+
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(run.workflowName).font(.title3.weight(.semibold))
@@ -118,6 +143,7 @@ private struct RunDetail: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            fixButtons
             whyButton
             UndoButton(run: run)
             Button("Show Steps") { showGraph = false }
@@ -132,6 +158,7 @@ private struct RunDetail: View {
                     Text(run.workflowName).font(.title2.weight(.semibold))
                     StateBadge(state: run.state)
                     Spacer()
+                    fixButtons
                     whyButton
                     UndoButton(run: run)
                     if model.core.flatMap({ try? $0.store.workflow(id: run.workflowID) }) != nil {

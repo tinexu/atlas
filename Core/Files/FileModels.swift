@@ -376,4 +376,6 @@ extension AtlasEvent.Name {
     public static let healthThreshold = "health.threshold"
     /// Payload: operationId, runId. A file change was recorded or undone.
     public static let fileOperationLogged = "file.operation"
+    /// An Orbit folder was added or removed, so what ATLAS may change did too.
+    public static let fileAccessChanged = "file.access.changed"
 }

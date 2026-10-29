@@ -32,7 +32,9 @@ struct SpacesView: View {
                         selection: spaces.selectedSpaceID,
                         onSelect: { spaces.selectedSpaceID = $0 },
                         onActivate: { spaces.activate($0) },
-                        onObject: { spaces.objectClicked($0) }
+                        onObject: { spaces.objectClicked($0) },
+                        onCourse: { model.study.open(courseID: $0) },
+                        onItem: { model.study.itemClicked($0, options: $1) }
                     )
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
 

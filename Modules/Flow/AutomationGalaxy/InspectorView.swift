@@ -120,6 +120,10 @@ private struct NodeInspector: View {
                         Label(issue.message, systemImage: issue.severity == .error ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
                             .foregroundStyle(issue.severity == .error ? .red : .orange)
                             .font(.callout)
+                        if let folder = issue.folderToAdd {
+                            Button("Add \(FileLocation.displayName(for: folder)) to Orbit") { model.addFolderToOrbit(folder) }
+                                .help("Opens the folder picker at \(folder.abbreviatedPath). Choosing it lets ATLAS watch and change files there.")
+                        }
                     }
                 }
             }

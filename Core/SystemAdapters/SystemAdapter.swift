@@ -110,6 +110,8 @@ public protocol SystemAdapter: Sendable {
     func openFile(atPath path: String, withApplication bundleID: String?) async throws
     func reveal(path: String) async throws
     func postNotification(title: String, body: String) async throws
+    /// A notification that opens `link` (an atlas:// link) when clicked.
+    func postNotification(title: String, body: String, link: String) async throws
     func fileKind(atPath path: String) -> FileKind
     /// Bytes, or nil if nothing is there.
     func fileSize(atPath path: String) -> Int64?
@@ -127,4 +129,18 @@ public protocol SystemAdapter: Sendable {
     func powerStatus() -> PowerStatus?
     func applicationName(for bundleID: String) -> String?
     func runningApplications() -> [RunningApplication]
+}
+
+extension SystemAdapter {
+    public func postNotification(title: String, body: String, link: String) async throws {
+        try await postNotification(title: title, body: body)
+    }
+}
+
+extension Notification.Name {
+    /// A notification with an atlas:// link was clicked. `object` is the link.
+    public static let atlasOpenLink = Notification.Name("atlas.openLink")
+    /// "Add Downloads to Orbit" from a module without Orbit (e.g. the Flow
+    /// editor). `object` is the folder's path; the app opens the picker there.
+    public static let atlasAddFolderToOrbit = Notification.Name("atlas.addFolderToOrbit")
 }

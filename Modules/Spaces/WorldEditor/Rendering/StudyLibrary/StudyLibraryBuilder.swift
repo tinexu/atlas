@@ -26,7 +26,8 @@ enum StudyLibraryBuilder {
 
     typealias B = Batches<LibraryMaterial>
 
-    static func build(objects: [SpaceObject], detail: Bool, palette: StudyLibraryPalette = .current) -> Result {
+    static func build(objects: [SpaceObject], detail: Bool, study: StudyRoomState = StudyRoomState(),
+                      palette: StudyLibraryPalette = .current) -> Result {
         let m = StudyLibraryMaterials(palette)
         let assignment = StudyLibrary.assign(objects)
         let room = Entity()
@@ -34,11 +35,14 @@ enum StudyLibraryBuilder {
         room.scale = SIMD3(repeating: scale)
         room.position = offset
         var parts = StudyLibraryParts(palette: palette)
+        parts.materials = m
 
         let shell = B(m)
+        let earned = !study.shelf.isEmpty
         buildFloor(shell)
         buildWalls(shell, detail: detail)
-        buildWindow(shell, detail: detail)
+        buildWindow(shell, detail: detail, live: detail)
+        if earned && !detail { buildEarnedBooks(study.shelf, m, into: room, detail: false, miniature: shell) }
         buildRug(shell)
         buildDesk(shell, detail: detail)
         buildArmchair(shell, detail: detail)
@@ -64,7 +68,10 @@ enum StudyLibraryBuilder {
             if assignment.roles[role] != nil { RoomBuilder.makeInteractive(container) }
         }
 
-        prop(.bookshelf, { buildBookcase($0, detail: detail) })
+        let reserved = study.books.isEmpty ? nil : Shelf.courseShelf
+        prop(.bookshelf, { buildBookcase($0, detail: detail, reservedShelf: reserved, earnedShelves: earned) })
+        if earned && detail { buildEarnedBooks(study.shelf, m, into: room, detail: true) }
+        parts.courseBooks = buildCourseBooks(study.books, m, into: room, detail: detail)
         prop(.lamp, { buildBankerLamp($0) }) { container in
             // The glow under the shade, kept apart so activation can fade it.
             let glow = ModelEntity(mesh: .generatePlane(width: 0.28, height: 0.12), materials: [m.material(.lampGlow)])
@@ -75,9 +82,19 @@ enum StudyLibraryBuilder {
         }
         if detail {
             prop(.calendar, { buildCalendar($0) }) { container in
-                container.addChild(calendarDay(material: m.material(.paint(palette.forest))))
+                let face = Entity()
+                face.name = "calendarFace"
+                container.addChild(face)
+                parts.calendarFace = face
+                fillCalendarFace(face, study.deskCalendar, m)
             }
-            prop(.chalkboard, { buildChalkboard($0) })
+            prop(.chalkboard, { buildChalkboard($0) }) { container in
+                let content = Entity()
+                content.name = "boardContent"
+                container.addChild(content)
+                parts.boardContent = content
+                fillBoard(content, study.board, m)
+            }
             prop(.book, { buildOpenBook($0) }) { container in
                 // The top page, hinged at the spine, turns on activation.
                 let hinge = Entity()
@@ -114,17 +131,34 @@ enum StudyLibraryBuilder {
                 parts.chandelier = entity
             }
 
+            // Today's candle: its own entity so it can burn down, clickable for stats.
+            let candle = Entity()
+            candle.name = StudyRoomState.Item.candle.entityName
+            candle.position = ReadingCorner.candleBase
+            // The wax's origin is its base, so it burns down from the top.
+            var waxShape = MeshBatch()
+            waxShape.add(.generateCylinder(height: ReadingCorner.candleHeight, radius: 0.017), at: [0, ReadingCorner.candleHeight / 2, 0])
+            let waxHolder = waxShape.entity(m.material(.paper)) ?? ModelEntity()
+            candle.addChild(waxHolder)
             let flame = Entity()
-            flame.position = ReadingCorner.flame
+            flame.position = [0, ReadingCorner.candleHeight + 0.012, 0]
             let flameMesh = ModelEntity(mesh: .generateSphere(radius: 1), materials: [m.material(.flame)])
             flameMesh.scale = [0.012, 0.028, 0.012]
             flameMesh.components.set(OpacityComponent(opacity: 1))
             flame.addChild(flameMesh)
-            room.addChild(flame)
+            candle.addChild(flame)
+            room.addChild(candle)
+            RoomBuilder.makeInteractive(candle)
             parts.flame = flame
+            parts.candleWax = waxHolder
 
+            parts.hourglass = buildHourglass(m, into: room)
+
+            buildLiveWindow(m, into: room, parts: &parts)
             parts.rain = buildRain(m, into: room)
             parts.steam = buildSteam(m, into: room)
+            parts.starsContent = buildStars(into: room)
+            if let reader = study.reader { buildReader(reader, m, into: room, parts: &parts) }
         }
 
         addLights(to: room, detail: detail, palette: palette, parts: &parts)
@@ -176,6 +210,7 @@ enum StudyLibraryBuilder {
         moon.shadow = SpotLightComponent.Shadow()
         moon.look(at: [0.1, 0, 0.6], from: [1.25, 2.2, -1.66], relativeTo: room)
         room.addChild(moon, preservingWorldTransform: true)
+        parts.windowLight = moon
     }
 
     // MARK: - Floor
@@ -274,14 +309,22 @@ enum StudyLibraryBuilder {
 
     enum Window {
         static let centre: Float = 0.8, width: Float = 1.3, bottom: Float = 0.6, top: Float = 2.3
+        /// Where clicks on the window land: in front of the back wall's
+        /// picking shape (its inner face is at z −1.5).
+        static let clickZ: Float = -1.46
     }
 
-    static func buildWindow(_ b: B, detail: Bool) {
+    /// The frame and sill; `live: false` (the miniature) also bakes in a
+    /// still blue-hour sky, moon and glass, which the full room builds as
+    /// live parts instead (`buildLiveWindow`).
+    static func buildWindow(_ b: B, detail: Bool, live: Bool = false) {
         let cx = Window.centre, frameZ: Float = -1.56
         let midY = (Window.bottom + Window.top) / 2, height = Window.top - Window.bottom
-        b.add(.sky, .generatePlane(width: 1.7, height: 2.1), at: [cx, midY, -1.75])
-        b.add(.moon, LoftShapes.unitSphere, at: [cx + 0.38, 2.05, -1.73], scale: SIMD3(repeating: 0.075))
-        b.add(.glass, .generatePlane(width: Window.width, height: height), at: [cx, midY, -1.58])
+        if !live {
+            b.add(.sky, .generatePlane(width: 1.7, height: 2.1), at: [cx, midY, -1.75])
+            b.add(.moon, LoftShapes.unitSphere, at: [cx + 0.38, 2.05, -1.73], scale: SIMD3(repeating: 0.075))
+            b.add(.glass, .generatePlane(width: Window.width, height: height), at: [cx, midY, -1.58])
+        }
         // Walnut frame with a 2 × 3 grid of panes.
         b.add(.walnut, rbox(0.06, height + 0.06, 0.14, 0.015), at: [cx - Window.width / 2, midY, frameZ])
         b.add(.walnut, rbox(0.06, height + 0.06, 0.14, 0.015), at: [cx + Window.width / 2, midY, frameZ])
@@ -297,9 +340,9 @@ enum StudyLibraryBuilder {
     /// their own loop (the motion animates the groups).
     static func buildRain(_ m: StudyLibraryMaterials, into room: Entity) -> [Entity] {
         var random = SeededRandom(seed: 7)
-        return (0..<6).map { group in
+        return (0..<4).map { group in
             var batch = MeshBatch()
-            for _ in 0..<6 {
+            for _ in 0..<9 {
                 let length = Float.random(in: 0.06...0.14, using: &random)
                 batch.add(.generateBox(width: 0.003, height: length, depth: 0.002),
                           at: [Float.random(in: 0.2...1.4, using: &random), Float.random(in: 1.0...2.18, using: &random), -1.595])
@@ -337,9 +380,14 @@ enum StudyLibraryBuilder {
         static let start: Float = -1.48, end: Float = 1.12
         static let floors: [Float] = [0.115, 0.575, 1.035, 1.495, 1.955]
         static let segments: [(Float, Float)] = [(-1.44, -0.615), (-0.585, 0.225), (0.255, 1.08)]
+        /// The eye-level shelf the course books stand on.
+        static let courseShelf = 2
     }
 
-    static func buildBookcase(_ b: B, detail: Bool) {
+    /// `reservedShelf` is left free (for the course books).
+    /// `earnedShelves`: the upper two shelves hold only the books you've
+    /// earned (and the photo and fern), not decorative ones.
+    static func buildBookcase(_ b: B, detail: Bool, reservedShelf: Int? = nil, earnedShelves: Bool = false) {
         let depth = Shelf.front - Shelf.back, x = (Shelf.front + Shelf.back) / 2
         let length = Shelf.end - Shelf.start, z = (Shelf.start + Shelf.end) / 2
         b.add(.wainscot, box(0.02, 2.3, length - 0.04), at: [Shelf.back + 0.012, 1.2, z])
@@ -359,7 +407,7 @@ enum StudyLibraryBuilder {
         var random = SeededRandom(seed: 21)
         guard detail else {
             // Miniature: a couple of coloured blocks per shelf.
-            for (shelf, floor) in Shelf.floors.enumerated() {
+            for (shelf, floor) in Shelf.floors.enumerated() where shelf != reservedShelf && !(earnedShelves && shelf >= 3) {
                 for (index, segment) in Shelf.segments.enumerated() {
                     let length = (segment.1 - segment.0) * Float.random(in: 0.55...0.85, using: &random)
                     b.add(.paint(spines[(shelf + index * 2) % 4]), rbox(0.2, 0.25, length, 0.01),
@@ -373,11 +421,19 @@ enum StudyLibraryBuilder {
         enum Decor { case fern, photo, hourglass, bookends, stack }
         let decor: [Int: Decor] = [4 * 3 + 0: .fern, 3 * 3 + 2: .photo, 2 * 3 + 1: .hourglass, 1 * 3 + 0: .bookends,
                                    0 * 3 + 2: .stack, 3 * 3 + 0: .stack]
-        for (shelf, floor) in Shelf.floors.enumerated() {
+        for (shelf, floor) in Shelf.floors.enumerated() where shelf != reservedShelf {
             for (index, segment) in Shelf.segments.enumerated() {
                 var cursor = segment.0 + 0.02
                 var limit = segment.1 - 0.02
-                switch decor[shelf * 3 + index] {
+                let upper = earnedShelves && shelf >= 3
+                let item = decor[shelf * 3 + index]
+                if upper {
+                    // Keep the photo and fern; earned books fill the rest.
+                    if item == .photo { addPhoto(b, at: [Shelf.front - 0.12, floor, limit - 0.1]) }
+                    if item == .fern { addFern(b, at: [Shelf.front - 0.16, floor, limit - 0.1]) }
+                    continue
+                }
+                switch item {
                 case .fern:
                     addFern(b, at: [Shelf.front - 0.16, floor, limit - 0.1])
                     limit -= 0.25
@@ -423,6 +479,115 @@ enum StudyLibraryBuilder {
                 }
             }
         }
+    }
+
+    // MARK: - Study timer
+
+    enum Hourglass {
+        static let base = SIMD3<Float>(0.2, Desk.top, -0.52)
+        static let neck: Float = 0.112
+        static let topSand = (height: Float(0.07), radius: Float(0.033))
+        static let pile = (height: Float(0.06), radius: Float(0.04))
+        static let floor: Float = 0.014
+    }
+
+    /// The hourglass on the desk: brass frame, glass bulbs and sand that
+    /// drains as the session goes (set by the motion from the room state).
+    static func buildHourglass(_ m: StudyLibraryMaterials, into room: Entity) -> StudyLibraryParts.HourglassParts {
+        let container = Entity()
+        container.name = StudyRoomState.Item.hourglass.entityName
+        container.position = Hourglass.base
+        let flipper = Entity()
+        container.addChild(flipper)
+        let frame = B(m)
+        frame.add(.brass, rbox(0.11, 0.012, 0.11, 0.004), at: [0, 0.006, 0])
+        frame.add(.brass, rbox(0.11, 0.012, 0.11, 0.004), at: [0, 0.218, 0])
+        for angle in [Float(0.6), 2.7, 4.8] {
+            frame.add(.brass, .generateCylinder(height: 0.2, radius: 0.005, segments: 8), at: [cos(angle) * 0.045, 0.112, sin(angle) * 0.045])
+        }
+        frame.add(.glass, .generateCone(height: 0.098, radius: 0.044), at: [0, 0.061, 0])
+        frame.add(.glass, .generateCone(height: 0.098, radius: 0.044), at: [0, 0.163, 0], rotation: simd_quatf(angle: .pi, axis: [1, 0, 0]))
+        frame.flush(into: flipper)
+
+        let sand = m.material(.paint("#D9C08F"))
+        // Top sand: an upside-down cone with its tip at the neck (the mesh's
+        // origin, so scaling keeps it there).
+        var topShape = MeshBatch()
+        topShape.add(.generateCone(height: Hourglass.topSand.height, radius: Hourglass.topSand.radius),
+                     at: [0, Hourglass.topSand.height / 2, 0], rotation: simd_quatf(angle: .pi, axis: [1, 0, 0]))
+        let top = topShape.entity(sand) ?? ModelEntity()
+        top.position = [0, Hourglass.neck, 0]
+        // The pile grows from the bottom.
+        var pileShape = MeshBatch()
+        pileShape.add(.generateCone(height: Hourglass.pile.height, radius: Hourglass.pile.radius), at: [0, Hourglass.pile.height / 2, 0])
+        let pile = pileShape.entity(sand) ?? ModelEntity()
+        pile.position = [0, Hourglass.floor, 0]
+        let stream = ModelEntity(mesh: .generateCylinder(height: 1, radius: 0.0012), materials: [sand])
+        stream.isEnabled = false
+        for part in [top, pile, stream] { flipper.addChild(part) }
+        room.addChild(container)
+        RoomBuilder.makeInteractive(container)
+        return StudyLibraryParts.HourglassParts(container: container, flipper: flipper, topSand: top, pile: pile, stream: stream)
+    }
+
+    // MARK: - Course books
+
+    static let courseBook = (height: Float(0.36), thickness: Float(0.055), depth: Float(0.24))
+
+    /// Where course books stand on their shelf: the middle section first
+    /// (it faces the room), then the front one, then the back corner.
+    static func courseBookSlots(count: Int) -> [Float] {
+        var slots: [Float] = []
+        for segment in [Shelf.segments[1], Shelf.segments[2], Shelf.segments[0]] {
+            var z = segment.0 + 0.03
+            while z + courseBook.thickness <= segment.1 - 0.02 {
+                slots.append(z + courseBook.thickness / 2)
+                z += courseBook.thickness + 0.008
+            }
+        }
+        return Array(slots.prefix(count))
+    }
+
+    /// One tall book per course, in its colour, its code on the spine in
+    /// small brass letters. Each is clickable and slides out on hover. The
+    /// miniature draws them as plain blocks.
+    static func buildCourseBooks(_ books: [StudyRoomState.Book], _ m: StudyLibraryMaterials, into room: Entity,
+                                 detail: Bool) -> [UUID: Entity] {
+        let size = courseBook
+        let floor = Shelf.floors[Shelf.courseShelf]
+        let x = Shelf.front - 0.02 - size.depth / 2
+        var entities: [UUID: Entity] = [:]
+        guard detail else {
+            let blocks = B(m)
+            for (book, z) in zip(books, courseBookSlots(count: books.count)) {
+                blocks.add(.paint(book.color), box(size.depth, size.height, size.thickness), at: [x, floor + size.height / 2, z])
+            }
+            blocks.flush(into: room)
+            return entities
+        }
+        let spine = simd_quatf(angle: .pi / 2, axis: [0, 1, 0]) * simd_quatf(angle: .pi / 2, axis: [0, 0, 1])
+        for (book, z) in zip(books, courseBookSlots(count: books.count)) {
+            let container = Entity()
+            container.name = StudyRoomState.courseName(book.id)
+            container.position = [x, floor, z]
+            // Two meshes per book: the cover, and the brass bands with the code.
+            let parts = B(m)
+            parts.add(.paint(book.color), rbox(size.depth, size.height, size.thickness, 0.006), at: [0, size.height / 2, 0])
+            for y in [Float(0.045), size.height - 0.045] {
+                parts.add(.brassLabel, box(0.003, 0.008, size.thickness * 0.92), at: [size.depth / 2 + 0.0015, y, 0])
+            }
+            let text = MeshResource.generateText(book.code, extrusionDepth: 0.0015, font: .systemFont(ofSize: 0.03, weight: .bold))
+            let label = Transform(rotation: spine, translation: [size.depth / 2 + 0.002, size.height / 2, 0]).matrix
+                * Transform(translation: [-text.bounds.center.x, -text.bounds.center.y, 0]).matrix
+            parts.add(.brassLabel, LoftGeometry(text), matrix: label)
+            parts.flush(into: container)
+            // Hover slides it 3 cm out of the shelf.
+            container.components.set(RoomBuilder.HoverOffsetComponent(offset: [0.03, 0, 0]))
+            room.addChild(container)
+            RoomBuilder.makeInteractive(container)
+            entities[book.id] = container
+        }
+        return entities
     }
 
     static func addFern(_ b: B, at base: SIMD3<Float>) {
@@ -600,22 +765,44 @@ enum StudyLibraryBuilder {
         b.add(.brass, rbox(0.13, 0.012, 0.07, 0.004), at: base + [0, 0.006, 0])
         b.add(.brass, box(0.006, 0.13, 0.006), at: base + [-0.055, 0.07, -0.01], rotation: tilt)
         b.add(.brass, box(0.006, 0.13, 0.006), at: base + [0.055, 0.07, -0.01], rotation: tilt)
-        b.add(.paper, rbox(0.11, 0.13, 0.006, 0.004), at: base + [0, 0.085, 0], rotation: tilt)
-        b.add(.leather, box(0.11, 0.028, 0.008), at: base + [0, 0.085, 0] + tilt.act([0, 0.051, 0.001]), rotation: tilt)
     }
 
-    /// The calendar card's big day number.
-    static func calendarDay(material: any RealityKit.Material) -> Entity {
-        let day = Calendar.current.component(.day, from: Date())
-        let mesh = MeshResource.generateText("\(day)", extrusionDepth: 0.002, font: .systemFont(ofSize: 0.055, weight: .bold))
-        let text = ModelEntity(mesh: mesh, materials: [material])
-        let tilt = simd_quatf(angle: -0.22, axis: [1, 0, 0])
-        let holder = Entity()
-        holder.position = SIMD3<Float>(-0.04, Desk.top, -0.76) + [0, 0.085, 0] + tilt.act([0, -0.012, 0.004])
-        holder.orientation = tilt
-        text.position = [-mesh.bounds.center.x, -mesh.bounds.center.y, 0]
-        holder.addChild(text)
-        return holder
+    enum DeskCalendar {
+        static let base = SIMD3<Float>(-0.04, Desk.top, -0.76)
+        static let tilt = simd_quatf(angle: -0.22, axis: [1, 0, 0])
+        static var card: SIMD3<Float> { base + [0, 0.085, 0] }
+    }
+
+    /// The card, its ribbon (the course's colour) and the big digits: days
+    /// to the next deadline, or today's date when nothing's due. Dusty rose
+    /// at three days or less, burgundy on the day.
+    static func fillCalendarFace(_ face: Entity, _ desk: StudyRoomState.DeskCalendar, _ m: StudyLibraryMaterials) {
+        face.children.removeAll()
+        let palette = m.palette
+        let tilt = DeskCalendar.tilt
+        let cardColor: String, inkColor: String
+        switch desk.tone {
+        case .calm: (cardColor, inkColor) = (palette.cream, palette.forest)
+        case .soon: (cardColor, inkColor) = (palette.dustyRose, palette.burgundy)
+        case .today: (cardColor, inkColor) = (palette.burgundy, palette.cream)
+        }
+        let parts = B(m)
+        parts.add(.paint(cardColor), rbox(0.11, 0.13, 0.006, 0.004), at: DeskCalendar.card, rotation: tilt)
+        parts.add(.paint(desk.ribbon ?? palette.burgundy), box(0.11, 0.028, 0.008),
+                  at: DeskCalendar.card + tilt.act([0, 0.051, 0.001]), rotation: tilt)
+        // Digits and caption, as one mesh.
+        let digits = MeshResource.generateText(desk.text.isEmpty ? " " : desk.text, extrusionDepth: 0.002,
+                                               font: .systemFont(ofSize: 0.055, weight: .bold))
+        parts.add(.paint(inkColor), LoftGeometry(digits),
+                  matrix: Transform(rotation: tilt, translation: DeskCalendar.card + tilt.act([0, -0.008, 0.004])).matrix
+                      * Transform(translation: [-digits.bounds.center.x, -digits.bounds.center.y, 0]).matrix)
+        if !desk.caption.isEmpty {
+            let caption = MeshResource.generateText(desk.caption, extrusionDepth: 0.001, font: .systemFont(ofSize: 0.016, weight: .semibold))
+            parts.add(.paint(inkColor), LoftGeometry(caption),
+                      matrix: Transform(rotation: tilt, translation: DeskCalendar.card + tilt.act([0, -0.048, 0.004])).matrix
+                          * Transform(translation: [-caption.bounds.center.x, -caption.bounds.center.y, 0]).matrix)
+        }
+        parts.flush(into: face)
     }
 
     static func buildLaptop(_ b: B) {
@@ -656,25 +843,76 @@ enum StudyLibraryBuilder {
         let c = SIMD3<Float>(-1.0, 1.6, -1.48)
         b.add(.walnut, rbox(1.0, 0.7, 0.04, 0.02), at: c)
         b.add(.forest, box(0.9, 0.6, 0.02), at: c + [0, 0, 0.015])
-        let chalk = LibraryMaterial.paper
-        var random = SeededRandom(seed: 3)
-        for line in 0..<6 {
-            let width = Float.random(in: 0.12...0.3, using: &random)
-            b.add(chalk, box(width, 0.007, 0.003), at: c + [-0.38 + width / 2, 0.2 - Float(line) * 0.075, 0.027])
-        }
-        b.add(chalk, box(0.2, 0.007, 0.003), at: c + [-0.27, 0.26, 0.027])
-        // A small grid on the right.
-        for index in 0...4 {
-            b.add(chalk, box(0.004, 0.24, 0.003), at: c + [0.08 + Float(index) * 0.06, -0.1, 0.027])
-        }
-        for index in 0...3 {
-            b.add(chalk, box(0.24, 0.004, 0.003), at: c + [0.2, -0.22 + Float(index) * 0.08, 0.027])
-        }
-        // Brass clip with two paper cards.
-        b.add(.brass, rbox(0.07, 0.022, 0.016, 0.005), at: c + [0.33, 0.29, 0.035])
-        b.add(.paper, box(0.11, 0.15, 0.004), at: c + [0.31, 0.2, 0.03], rotation: simd_quatf(angle: 0.06, axis: [0, 0, 1]))
-        b.add(.paint(StudyLibraryPalette.current.parchment), box(0.11, 0.15, 0.004), at: c + [0.355, 0.19, 0.033],
+        // Brass clip with two paper cards, top right; the rest is this week's chalk.
+        b.add(.brass, rbox(0.07, 0.022, 0.016, 0.005), at: c + [0.39, 0.29, 0.035])
+        b.add(.paper, box(0.11, 0.15, 0.004), at: c + [0.37, 0.2, 0.03], rotation: simd_quatf(angle: 0.06, axis: [0, 0, 1]))
+        b.add(.paint(StudyLibraryPalette.current.parchment), box(0.11, 0.15, 0.004), at: c + [0.4, 0.19, 0.033],
               rotation: simd_quatf(angle: -0.1, axis: [0, 0, 1]))
+    }
+
+    enum Board {
+        static let centre = SIMD3<Float>(-1.0, 1.6, -1.48)
+        static let surface: Float = -1.452
+        static let rowHeight: Float = 0.062
+        static let firstRow: Float = 0.2
+        static let titleLength = 26
+    }
+
+    /// Where row `index`'s checkbox sits (room coordinates).
+    static func boardRowPosition(_ index: Int) -> SIMD3<Float> {
+        [Board.centre.x - 0.405, Board.centre.y + Board.firstRow - Float(index) * Board.rowHeight, Board.surface]
+    }
+
+    /// This week's assignments in chalk: a checkbox, the course's colour
+    /// dot, the title and the day. Up to 8 rows, then "+N more".
+    static func fillBoard(_ content: Entity, _ board: StudyRoomState.Board, _ m: StudyLibraryMaterials) {
+        content.children.removeAll()
+        let chalk = B(m)
+        func text(_ string: String, size: CGFloat, at position: SIMD3<Float>, alignRight: Bool = false) {
+            let mesh = MeshResource.generateText(string, extrusionDepth: 0.001, font: .systemFont(ofSize: size, weight: .medium))
+            let x = alignRight ? -mesh.bounds.max.x : -mesh.bounds.min.x
+            chalk.add(.paper, LoftGeometry(mesh), matrix: Transform(translation: position + [x, -mesh.bounds.center.y, 0]).matrix)
+        }
+        text("This week", size: 0.034, at: [Board.centre.x - 0.41, Board.centre.y + 0.255, Board.surface])
+        guard !board.rows.isEmpty else {
+            text("Nothing due this week ✓", size: 0.03, at: [Board.centre.x - 0.41, Board.centre.y + 0.13, Board.surface])
+            chalk.flush(into: content)
+            return
+        }
+        let dots = B(m)
+        for (index, row) in board.rows.enumerated() {
+            let check = boardRowPosition(index)
+            let y = check.y
+            var title = row.title
+            if title.count > Board.titleLength { title = String(title.prefix(Board.titleLength - 1)) + "…" }
+            text(title, size: 0.026, at: [Board.centre.x - 0.34, y, Board.surface])
+            text(row.due, size: 0.024, at: [Board.centre.x + 0.27, y, Board.surface], alignRight: true)
+            dots.add(.paint(row.color ?? m.palette.cream), .generateCylinder(height: 0.003, radius: 0.009, segments: 12),
+                     at: [Board.centre.x - 0.362, y, Board.surface], rotation: simd_quatf(angle: .pi / 2, axis: [1, 0, 0]))
+            if row.isExam {
+                chalk.add(.paper, box(0.008, 0.008, 0.002), at: [Board.centre.x - 0.362, y + 0.017, Board.surface],
+                          rotation: simd_quatf(angle: .pi / 4, axis: [0, 0, 1]))
+            }
+            // The checkbox: its own entity, so it can be clicked.
+            var outline = MeshBatch()
+            let edges: [(SIMD3<Float>, SIMD3<Float>)] = [([0, 0.014, 0], [0.03, 0.003, 0.002]), ([0, -0.014, 0], [0.03, 0.003, 0.002]),
+                                                         ([0.014, 0, 0], [0.003, 0.03, 0.002]), ([-0.014, 0, 0], [0.003, 0.03, 0.002])]
+            for (offset, size) in edges {
+                outline.add(.generateBox(width: size.x, height: size.y, depth: size.z), at: offset)
+            }
+            if let checkbox = outline.entity(m.material(.paper), name: StudyRoomState.Item.boardRow(row.id).entityName) {
+                checkbox.position = check
+                checkbox.components.set(CollisionComponent(shapes: [.generateBox(size: [0.05, 0.05, 0.02])]))
+                checkbox.components.set(InputTargetComponent())
+                content.addChild(checkbox)
+            }
+        }
+        if board.more > 0 {
+            text("+\(board.more) more", size: 0.024,
+                 at: [Board.centre.x - 0.34, Board.centre.y + Board.firstRow - Float(board.rows.count) * Board.rowHeight, Board.surface])
+        }
+        chalk.flush(into: content)
+        dots.flush(into: content)
     }
 
     // MARK: - Reading corner
@@ -687,7 +925,10 @@ enum StudyLibraryBuilder {
         }
         static var bulb: SIMD3<Float> { point([0.62, 1.47, -0.25]) }
         static var table: SIMD3<Float> { point([-0.66, 0, 0.12]) }
-        static var flame: SIMD3<Float> { table + [-0.05, 0.705, 0] }
+        /// Where the candle stands in its holder; it's `candleHeight` tall when new.
+        static var candleBase: SIMD3<Float> { table + [-0.05, 0.607, 0] }
+        static let candleHeight: Float = 0.13
+        static var flame: SIMD3<Float> { candleBase + [0, candleHeight + 0.012, 0] }
     }
 
     static func buildArmchair(_ b: B, detail: Bool) {
@@ -727,11 +968,10 @@ enum StudyLibraryBuilder {
         let candle = table + [-0.05, 0.575, 0]
         b.add(.brass, .generateCylinder(height: 0.012, radius: 0.045), at: candle + [0, 0.006, 0])
         b.add(.brass, .generateCylinder(height: 0.025, radius: 0.025), at: candle + [0, 0.02, 0])
-        b.add(.paper, .generateCylinder(height: 0.09, radius: 0.017, segments: 10), at: candle + [0, 0.077, 0])
         let cup = table + [0.1, 0.575, 0.05]
         b.add(.ceramic, .generateCylinder(height: 0.006, radius: 0.055), at: cup + [0, 0.003, 0])
-        b.add(.ceramic, .generateCone(height: 0.05, radius: 0.04), at: cup + [0, 0.03, 0], rotation: simd_quatf(angle: .pi, axis: [1, 0, 0]))
-        b.add(.paint(StudyLibraryPalette.current.walnut), .generateCylinder(height: 0.002, radius: 0.033), at: cup + [0, 0.05, 0])
+        b.add(.ceramic, .generateCylinder(height: 0.045, radius: 0.034), at: cup + [0, 0.0285, 0])
+        b.add(.paint(StudyLibraryPalette.current.walnut), .generateCylinder(height: 0.002, radius: 0.03), at: cup + [0, 0.051, 0])
     }
 
     enum Globe {
@@ -831,7 +1071,41 @@ struct StudyLibraryParts {
     var globe: Entity?
     /// Each holds one child mesh; the holder moves, the child fades.
     var rain: [Entity] = []
+    var snow: [Entity] = []
+    /// The live window (full room only).
+    var sky: ModelEntity?
+    var skyOrb: ModelEntity?
+    var clouds: ModelEntity?
+    var fog: ModelEntity?
+    var windowLight: SpotLight?
+    /// Where clouds, fog and snow are added the first time they're needed.
+    weak var room: Entity?
+    /// The streak stars, refilled when the streak changes.
+    var starsContent: Entity?
+    /// The reading Companion's turning page, eyes and "something's waiting" light.
+    var readerPage: Entity?
+    var readerAccents: [ModelEntity] = []
+    var readerDot: ModelEntity?
     var steam: [Entity] = []
+    /// Course books by course, for the slide-onto-the-shelf animation.
+    var courseBooks: [UUID: Entity] = [:]
+    /// Today's candle wax (scaled down as it burns).
+    var candleWax: Entity?
+
+    struct HourglassParts {
+        let container: Entity
+        /// Turned over when a session ends.
+        let flipper: Entity
+        let topSand: Entity
+        let pile: Entity
+        let stream: ModelEntity
+    }
+
+    var hourglass: HourglassParts?
+    /// The chalkboard's rows and the desk calendar's face, redrawn when they change.
+    var boardContent: Entity?
+    var calendarFace: Entity?
+    var materials: StudyLibraryMaterials?
 }
 
 /// Repeatable "random" numbers, so a room rebuilds identically.

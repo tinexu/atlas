@@ -68,7 +68,7 @@ final class CharacterSnapshotter {
     private let device = MTLCreateSystemDefaultDevice()
 
     static func key(_ settings: CompanionSettings, _ presentation: CharacterPresentation) -> String {
-        "\(settings.character.rawValue)|\(settings.primaryColor)|\(settings.secondaryColor)|\(settings.accessory.rawValue)|\(settings.customCharacterPath ?? "")|\(presentation.accent)|\(presentation.eyesClosed)"
+        "\(settings.character.rawValue)|\(settings.primaryColor)|\(settings.secondaryColor)|\(settings.accessory.rawValue)|\(settings.customCharacterPath ?? "")|\(presentation.accent)|\(presentation.eyesClosed)|\(presentation.isReading)"
     }
 
     func image(settings: CompanionSettings, presentation: CharacterPresentation) async -> NSImage? {
@@ -153,6 +153,19 @@ struct CharacterStill: View {
                     RoundedRectangle(cornerRadius: s * 0.1).fill(primary).frame(width: s * 0.5, height: s * 0.38).offset(y: -s * 0.1)
                     RoundedRectangle(cornerRadius: s * 0.07).fill(Color.black.opacity(0.85)).frame(width: s * 0.4, height: s * 0.24).offset(y: -s * 0.1)
                     eyes(accent, s: s, y: -s * 0.1, size: s * 0.08, spacing: s * 0.09, white: false)
+                }
+            }
+            .overlay {
+                if presentation.isReading {
+                    // A small open book held in front.
+                    HStack(spacing: s * 0.01) {
+                        RoundedRectangle(cornerRadius: s * 0.01).fill(Color(white: 0.96)).frame(width: s * 0.15, height: s * 0.13)
+                        RoundedRectangle(cornerRadius: s * 0.01).fill(Color(white: 0.96)).frame(width: s * 0.15, height: s * 0.13)
+                    }
+                    .padding(s * 0.012)
+                    .background(RoundedRectangle(cornerRadius: s * 0.02).fill(Color(red: 0.49, green: 0.23, blue: 0.27)))
+                    .rotation3DEffect(.degrees(35), axis: (x: 1, y: 0, z: 0))
+                    .offset(y: s * 0.2)
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)

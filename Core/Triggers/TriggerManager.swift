@@ -80,6 +80,7 @@ public final class TriggerManager: @unchecked Sendable {
     private let environment: TriggerEnvironment
     private let system: SystemAdapter
     private let registry: ActionRegistry
+    private let fileAccess: FileAccessPolicy
 
     private struct Listener {
         let workflowID: UUID
@@ -113,7 +114,8 @@ public final class TriggerManager: @unchecked Sendable {
     var fileSettleInterval: TimeInterval = 0.5
 
     public init(store: AtlasStore, engine: AutomationEngine, events: EventBus, environment: TriggerEnvironment,
-                system: SystemAdapter, registry: ActionRegistry) {
+                system: SystemAdapter, registry: ActionRegistry, fileAccess: FileAccessPolicy) {
+        self.fileAccess = fileAccess
         self.store = store
         self.engine = engine
         self.events = events
@@ -155,6 +157,20 @@ public final class TriggerManager: @unchecked Sendable {
     }
 
     public var activeTriggerCount: Int { lock.synchronized { listeners.count } }
+
+    /// Orbit folders changed: folder triggers set up again, so one whose
+    /// folder was just added starts watching and one whose folder was
+    /// removed stops.
+    public func fileAccessChanged() {
+        let folderTypes: Set<String> = [TriggerCatalog.fileCreated, TriggerCatalog.folderChanged]
+        let removed = lock.synchronized { () -> [Listener] in
+            let matching = listeners.values.filter { folderTypes.contains($0.type) }
+            for listener in matching { listeners[listener.nodeID] = nil }
+            return Array(matching)
+        }
+        removed.flatMap(\.tokens).forEach { $0.cancel() }
+        sync()
+    }
 
     /// Brings listeners in line with the saved workflows.
     public func sync() {
@@ -203,6 +219,11 @@ public final class TriggerManager: @unchecked Sendable {
         }
     }
 
+    /// Why a folder trigger isn't watching.
+    public static func unauthorizedMessage(_ folder: String) -> String {
+        "Not watching \(folder.abbreviatedPath): it isn't in Orbit, so ATLAS couldn't move or change files there. Add it in Orbit → Folders to turn this trigger on."
+    }
+
     private static func signature(_ workflow: Workflow, _ node: WorkflowStep) -> String {
         let params = node.parameters.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value.displayString)" }.joined(separator: "&")
         return "\(workflow.id)|\(node.config.triggerType ?? "")|\(params)"
@@ -232,6 +253,9 @@ public final class TriggerManager: @unchecked Sendable {
             let path = (folder as NSString).expandingTildeInPath
             guard !folder.isEmpty, system.fileKind(atPath: path) == .directory else {
                 throw TriggerError("The folder “\(folder)” doesn't exist.")
+            }
+            guard fileAccess.isAllowed(path) else {
+                throw TriggerError(Self.unauthorizedMessage(folder))
             }
             let extensions = Set((params["extensions"]?.stringValue ?? "").lowercased()
                 .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ".", with: "") }

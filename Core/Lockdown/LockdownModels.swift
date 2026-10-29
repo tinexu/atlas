@@ -203,23 +203,8 @@ public enum LockdownEssentials {
 
 /// A lockdown in progress, saved so it survives a crash or relaunch.
 public struct LockdownSession: Codable, Equatable, Sendable, Identifiable {
-    public struct Phase: Codable, Equatable, Sendable {
-        public enum Kind: String, Codable, Sendable { case focus, shortBreak, longBreak }
-        public var kind: Kind
-        /// Focus phases completed so far.
-        public var completedFocus: Int
-        /// The focus-timer session running this phase; nil while stopped.
-        public var sessionID: UUID?
-
-        public var isBreak: Bool { kind != .focus }
-        public var title: String {
-            switch kind {
-            case .focus: return "Focus"
-            case .shortBreak: return "Short break"
-            case .longBreak: return "Long break"
-            }
-        }
-    }
+    /// The pomodoro phase (shared with study sessions).
+    public typealias Phase = PomodoroPhase
 
     public var id: UUID
     public var spaceID: UUID

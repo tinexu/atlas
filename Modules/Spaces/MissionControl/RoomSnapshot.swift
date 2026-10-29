@@ -9,21 +9,25 @@ public struct RoomSnapshot: Identifiable, Hashable {
     public var objects: [SpaceObject]
     public var status: SpaceStatus
     public var isActive: Bool
+    /// The Study Library's courses and more, for that room only.
+    public var study: StudyRoomState?
 
     public var id: UUID { space.id }
 
-    public init(space: Space, room: RoomLayout, objects: [SpaceObject], status: SpaceStatus, isActive: Bool) {
+    public init(space: Space, room: RoomLayout, objects: [SpaceObject], status: SpaceStatus, isActive: Bool,
+                study: StudyRoomState? = nil) {
         self.space = space
         self.room = room
         self.objects = objects
         self.status = status
         self.isActive = isActive
+        self.study = study
     }
 
     /// What requires rebuilding the room's meshes when it changes. Status,
     /// selection, group and slot only update indicators or position.
     var geometry: Geometry {
-        Geometry(name: space.name, accent: space.accentColor, room: room, objects: objects)
+        Geometry(name: space.name, accent: space.accentColor, room: room, objects: objects, study: study?.geometry ?? [])
     }
 
     struct Geometry: Hashable {
@@ -31,6 +35,7 @@ public struct RoomSnapshot: Identifiable, Hashable {
         var accent: String
         var room: RoomLayout
         var objects: [SpaceObject]
+        var study: [String]
     }
 }
 

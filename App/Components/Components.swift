@@ -99,6 +99,7 @@ enum Formatting {
         case "space.restore": return "Restore where you left off"
         case "window-manager": return "Window Manager"
         case RunTrigger.test: return "Run now (test)"
+        case RunTrigger.retry: return "Retry of failed steps"
         case RunTrigger.subworkflow: return "Called by another automation"
         case "orbit": return "Orbit"
         case "cleanup": return "Cleanup Review"

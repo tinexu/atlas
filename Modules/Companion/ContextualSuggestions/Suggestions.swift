@@ -6,6 +6,8 @@ import Foundation
 public struct Suggestion: Identifiable, Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
         case workflowFailed, reviewQueue, lowDisk, displayConnected, repetition
+        /// An offer from an automation (e.g. the Study Library's "class soon").
+        case offer
 
         public var title: String {
             switch self {
@@ -14,6 +16,7 @@ public struct Suggestion: Identifiable, Equatable, Sendable {
             case .lowDisk: return "Low disk space"
             case .displayConnected: return "Display connected"
             case .repetition: return "Save repeated app launches as a workflow"
+            case .offer: return "Offers from your automations"
             }
         }
     }
@@ -30,6 +33,12 @@ public struct Suggestion: Identifiable, Equatable, Sendable {
         /// until you save it in the editor).
         case draftWorkflow(name: String, bundleIDs: [String])
         case openRunHistory(UUID)
+        /// The folder picker, opened at this folder, to add it to Orbit.
+        case addFolderToOrbit(String)
+        /// Runs a run's failed steps again.
+        case retryFailedSteps(UUID)
+        /// Runs a registered action through the engine.
+        case runAction(ActionID, ActionParameters)
     }
 
     public let id: UUID
@@ -96,15 +105,60 @@ public struct SuggestionGate: Sendable {
     }
 }
 
+/// What waits while you study: during a study session's focus phase,
+/// offers and suggestions are held (oldest first, no duplicates) and come
+/// out one at a time at the next break or the session's end. Urgent ones
+/// (a class about to start) and failures never wait.
+public struct StudyHold: Sendable {
+    public private(set) var isFocus = false
+    public private(set) var held: [Suggestion] = []
+
+    public init() {}
+
+    /// The suggestion to show now, or nil if it's held.
+    public mutating func offer(_ suggestion: Suggestion, urgent: Bool = false, holding: Bool = true) -> Suggestion? {
+        guard isFocus, holding, !urgent, suggestion.kind != .workflowFailed else { return suggestion }
+        if !held.contains(where: { $0.title == suggestion.title }) { held.append(suggestion) }
+        return nil
+    }
+
+    /// Focus started or ended. Ending it returns the first held one to show.
+    public mutating func setFocus(_ focus: Bool) -> Suggestion? {
+        guard focus != isFocus else { return nil }
+        isFocus = focus
+        return focus ? nil : next()
+    }
+
+    /// The next held suggestion, if any.
+    public mutating func next() -> Suggestion? {
+        held.isEmpty ? nil : held.removeFirst()
+    }
+}
+
 /// Turns a failed run into a plain explanation and, where possible, a fix.
 public enum FailureExplainer {
     public struct Explanation: Equatable, Sendable {
         public let message: String
         public let fixTitle: String?
         public let fix: Suggestion.Action?
+        /// A second button, e.g. "Retry failed steps".
+        public var secondaryTitle: String?
+        public var secondary: Suggestion.Action?
     }
 
-    public static func explain(_ run: WorkflowRun, appName: (String) -> String? = { _ in nil }) -> Explanation {
+    /// The folder to add to Orbit for a step that failed because a path it
+    /// uses isn't in one (its file's folder, or its destination's nearest
+    /// existing folder).
+    public static func folderToAuthorize(_ step: StepRecord, fileAccess: FileAccessPolicy) -> String? {
+        let candidates: [(key: String, isFolder: Bool)] = [("path", false), ("source", false), ("destination", true), ("folder", true)]
+        for (key, isFolder) in candidates {
+            guard let path = step.inputs[key]?.stringValue, !path.isEmpty, !path.contains("{{"), !fileAccess.isAllowed(path) else { continue }
+            return FileAccessPolicy.folderToAuthorize(for: path, isFolder: isFolder)
+        }
+        return nil
+    }
+
+    public static func explain(_ run: WorkflowRun, fileAccess: FileAccessPolicy? = nil, appName: (String) -> String? = { _ in nil }) -> Explanation {
         let failed = run.steps.first { $0.state == .failed } ?? run.steps.last { $0.state == .partiallySucceeded }
         let error = failed?.error ?? run.error ?? "It stopped without saying why."
         let lower = error.lowercased()
@@ -123,6 +177,11 @@ public enum FailureExplainer {
         if lower.contains("accessibility") {
             return Explanation(message: "ATLAS needs Accessibility permission to move windows. Grant it, then run “\(run.workflowName)” again.",
                                fixTitle: "Grant Accessibility", fix: .openPermissions)
+        }
+        if lower.contains("folders you've added to orbit"), let failed, let fileAccess,
+           let folder = folderToAuthorize(failed, fileAccess: fileAccess) {
+            return Explanation(message: error, fixTitle: "Add \(FileLocation.displayName(for: folder)) to Orbit", fix: .addFolderToOrbit(folder),
+                               secondaryTitle: "Retry failed steps", secondary: .retryFailedSteps(run.id))
         }
         if lower.contains("isn't in orbit") || lower.contains("not in orbit") || lower.contains("add it in orbit") || lower.contains("authorized") {
             return Explanation(message: "“\(stepName)” works on a folder you haven't added to Orbit, so ATLAS won't change files there. Add the folder in Orbit → Folders.",

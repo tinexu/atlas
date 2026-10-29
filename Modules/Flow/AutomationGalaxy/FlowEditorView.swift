@@ -184,13 +184,20 @@ private struct IssuesList: View {
             .padding(.vertical, 6)
             if isExpanded {
                 List(model.issues) { issue in
-                    Button {
-                        if let node = issue.nodeID { model.focus(on: node) }
-                    } label: {
-                        Label(issue.message, systemImage: issue.severity == .error ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(issue.severity == .error ? .red : .orange)
+                    HStack {
+                        Button {
+                            if let node = issue.nodeID { model.focus(on: node) }
+                        } label: {
+                            Label(issue.message, systemImage: issue.severity == .error ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(issue.severity == .error ? .red : .orange)
+                        }
+                        .buttonStyle(.plain)
+                        if let folder = issue.folderToAdd {
+                            Spacer()
+                            Button("Add \(FileLocation.displayName(for: folder)) to Orbit") { model.addFolderToOrbit(folder) }
+                                .controlSize(.small)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
                 .listStyle(.plain)
                 .frame(height: 130)

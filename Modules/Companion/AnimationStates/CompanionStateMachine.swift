@@ -191,10 +191,15 @@ public struct CharacterPresentation: Equatable, Sendable {
     public var accent: String
     public var opacity: Double
     public var eyesClosed: Bool
+    /// Holding a small open book, head bowed (a study session's focus).
+    public var isReading = false
 
     public enum Gesture: Equatable, Sendable { case none, hop, shake, nod }
 
-    public static func make(for state: CompanionState, intensity: CompanionSettings.Intensity, reduceMotion: Bool) -> CharacterPresentation {
+    /// `reading`: a study session's focus phase. Calm and fully visible,
+    /// reading a book, instead of the faded focus look.
+    public static func make(for state: CompanionState, intensity: CompanionSettings.Intensity, reduceMotion: Bool,
+                            reading: Bool = false) -> CharacterPresentation {
         let accent: String
         switch state {
         case .idle: accent = "#7DD3FC"
@@ -219,6 +224,13 @@ public struct CharacterPresentation: Equatable, Sendable {
         case .failure: presentation.gesture = .shake; presentation.bobAmplitude = 0.01
         case .focus: presentation.bobAmplitude = 0.01; presentation.bobPeriod = 6; presentation.opacity = 0.75
         case .sleeping: presentation.bobAmplitude = 0.015; presentation.bobPeriod = 6; presentation.opacity = 0.55; presentation.eyesClosed = true
+        }
+        if reading && (state == .focus || state == .idle) {
+            presentation.isReading = true
+            presentation.opacity = 1
+            presentation.bobAmplitude = 0.01
+            presentation.bobPeriod = 6
+            presentation.accent = "#818CF8"
         }
         if intensity == .still {
             presentation.rendering = .staticImage

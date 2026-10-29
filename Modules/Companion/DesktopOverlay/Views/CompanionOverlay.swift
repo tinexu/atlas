@@ -252,7 +252,7 @@ struct BubbleView: View {
                 HStack(spacing: 8) {
                     if bubble.recommendation == nil, let fixTitle = bubble.fixTitle, let fix = bubble.fix {
                         Button(fixTitle) {
-                            if let suggestion = bubble.suggestion { controller.accept(suggestion) } else { controller.perform(fix); controller.dismissBubble() }
+                            if let suggestion = bubble.suggestion { controller.accept(suggestion) } else { controller.perform(fix, from: bubble) }
                         }
                         .controlSize(.small)
                         .buttonStyle(.borderedProminent)
@@ -261,8 +261,16 @@ struct BubbleView: View {
                         Button("Not Now") { controller.dismiss(suggestion, forever: false) }.controlSize(.small)
                         Button("Don't Suggest This") { controller.dismiss(suggestion, forever: true) }
                             .controlSize(.small).buttonStyle(.borderless)
-                    } else if bubble.runID != nil {
+                    } else if bubble.runID != nil && bubble.secondary == nil {
                         Button("Details") { controller.openBubble() }.controlSize(.small).buttonStyle(.borderless)
+                    }
+                }
+                if bubble.recommendation == nil, let title = bubble.secondaryTitle, let secondary = bubble.secondary {
+                    HStack(spacing: 8) {
+                        Button(title) { controller.perform(secondary, from: bubble) }.controlSize(.small)
+                        if bubble.runID != nil {
+                            Button("Details") { controller.openBubble() }.controlSize(.small).buttonStyle(.borderless)
+                        }
                     }
                 }
             }
