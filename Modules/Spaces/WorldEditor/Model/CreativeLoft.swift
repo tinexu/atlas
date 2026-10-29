@@ -108,6 +108,8 @@ public struct CreativeRoomState: Hashable, Sendable {
         public var isFocused: Bool
         /// Counts exports saved; a change makes it do a small happy bounce.
         public var bounces: Int
+        /// Watch mode: on the window seat with a bowl of popcorn instead.
+        public var isWatching = false
         public var waiting: Int
         public var detail: String
 
@@ -135,6 +137,8 @@ public struct CreativeRoomState: Hashable, Sendable {
         case rug
         /// The Companion at its tiny easel.
         case painter
+        /// The little TV: Watch mode.
+        case tv
 
         public var entityName: String {
             switch self {
@@ -143,6 +147,7 @@ public struct CreativeRoomState: Hashable, Sendable {
             case .window: return "creativeitem:window"
             case .rug: return "creativeitem:rug"
             case .painter: return "creativeitem:painter"
+            case .tv: return "creativeitem:tv"
             }
         }
 
@@ -153,6 +158,7 @@ public struct CreativeRoomState: Hashable, Sendable {
             case "window": self = .window; return
             case "rug": self = .rug; return
             case "painter": self = .painter; return
+            case "tv": self = .tv; return
             default: break
             }
             if rest.hasPrefix("jar:"), let index = Int(rest.dropFirst(4)) {
@@ -188,6 +194,10 @@ public struct CreativeRoomState: Hashable, Sendable {
     public var rugDetail: String
     /// Nil hides the painter (Companion off, or set not to paint).
     public var painter: Painter?
+    /// Watch mode: the TV glows; `dimmed` gives the room its cozy evening look.
+    public var isWatching = false
+    public var dimmed = false
+    public var tvDetail = "Click to watch (YouTube in its own window)"
 
     public init(easel: Easel? = nil, monitorImage: String? = nil, monitorDetail: String = "", mug: Mug = Mug(),
                 pegboard: [String] = [], pegboardDetail: String = "", jars: [String] = [], shelvesDetail: String = "",
@@ -218,6 +228,7 @@ public struct CreativeRoomState: Hashable, Sendable {
         case .window: return windowDetail.isEmpty ? nil : windowDetail
         case .rug: return rugDetail.isEmpty ? nil : rugDetail
         case .painter: return painter?.detail
+        case .tv: return tvDetail
         }
     }
 

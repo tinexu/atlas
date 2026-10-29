@@ -201,6 +201,28 @@ struct CreativeSettingsView: View {
                         .disabled(!settings.breakReminders)
                 }
                 Section {
+                    Toggle("Watch profile and “Just watching”", isOn: $settings.watchEnabled)
+                    Picker("Start on", selection: $settings.watchStartPage) {
+                        ForEach(CreativeSettings.WatchStartPage.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    Toggle("Notes small on the right", isOn: $settings.watchWithNotes)
+                    Toggle("Also open the current project", isOn: $settings.watchOpensProject)
+                    Toggle("Play music too", isOn: $settings.watchMusic)
+                    if settings.watchMusic {
+                        TextField("Playlist", text: $settings.watchPlaylist, prompt: Text("spotify:playlist:…"))
+                    }
+                    Toggle("Dim the room while watching", isOn: $settings.dimWhileWatching)
+                    Toggle("Companion grabs popcorn", isOn: $settings.popcorn)
+                    Picker("Count watch time as creative time", selection: $settings.countWatchTime) {
+                        ForEach(CreativeSettings.WatchCounting.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }
+                } header: {
+                    Text("Watch")
+                } footer: {
+                    Text("Click the TV (or pick “Just watching” when you come in): YouTube opens in its own Chrome window, the room goes cozy and the Companion grabs popcorn. While watching, “Save to project” (menu bar or Companion) saves the video to the current project's tutorials.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
                     TextField("Weather city", text: Binding(get: { creative.weatherCity?() ?? "" }, set: { creative.setWeatherCity?($0) }),
                               prompt: Text("e.g. Boston, MA"))
                 } header: {
@@ -306,6 +328,15 @@ struct CreativeSettingsView: View {
                     saved.keepVersions = settings.keepVersions
                     saved.inspirationFolder = settings.inspirationFolder
                     saved.companionPaints = settings.companionPaints
+                    saved.watchEnabled = settings.watchEnabled
+                    saved.watchStartPage = settings.watchStartPage
+                    saved.watchWithNotes = settings.watchWithNotes
+                    saved.watchOpensProject = settings.watchOpensProject
+                    saved.watchMusic = settings.watchMusic
+                    saved.watchPlaylist = settings.watchPlaylist
+                    saved.dimWhileWatching = settings.dimWhileWatching
+                    saved.popcorn = settings.popcorn
+                    saved.countWatchTime = settings.countWatchTime
                     saved.quietDuringSessions = settings.quietDuringSessions
                     for (kind, on) in automationsOn where creative.automations?.workflow(kind)?.isEnabled != on {
                         try? creative.automations?.setEnabled(on, kind)
@@ -385,6 +416,20 @@ struct ProjectPickerView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("What are you working on?", systemImage: "rectangle.stack").font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
+                if creative.pickerOffersWatching {
+                    Button { creative.pick(nil) } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: NSColor(atlasHex: "#9AA7C7")).opacity(0.35))
+                                Image(systemName: "play.tv").font(.title).foregroundStyle(.secondary)
+                            }
+                            .frame(height: 90)
+                            Text("Just watching").font(.callout.weight(.semibold))
+                            Text("YouTube, cozy").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
                 ForEach(creative.pickerChoices) { project in
                     Button { creative.pick(project) } label: {
                         VStack(alignment: .leading, spacing: 4) {

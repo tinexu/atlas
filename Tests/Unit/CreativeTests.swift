@@ -829,3 +829,154 @@ enum CreativeLoftBuilderProbe {
     @MainActor
     static func splash(_ day: Int) -> SIMD3<Float> { CreativeLoftBuilder.splashPlacement(day: day).position }
 }
+
+/// Answers AppleScript with canned results, recording each script.
+final class MockAppleScript: AppleScriptRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    var results: [String: [String]?] = [:]   // by application name in the script
+    private(set) var scripts: [String] = []
+
+    func run(_ source: String) -> [String]? {
+        lock.withLock { scripts.append(source) }
+        for (app, result) in results where source.contains("tell application \"\(app)\"") { return result }
+        return nil
+    }
+}
+
+final class WatchModeTests: CreativeTestCase {
+    private var time: TimeHarness!
+    private var module: CreativeModule!
+    private var service: CreativeService { module.service }
+    private var script: MockAppleScript!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        time = try TimeHarness()
+        module = try CreativeModule(core: time.core, thumbnails: ProjectThumbnails(folder: temp.appendingPathComponent("thumbs"), maker: SolidThumbnails()))
+        module.service.now = { [environment = time.environment] in environment.now() }
+        service.settings.dayBoundaryHour = 0
+        script = MockAppleScript()
+        service.scriptRunner = script
+        service.tabReader = BrowserTabReader(runner: script, running: { ["com.google.Chrome", "com.apple.finder"] })
+    }
+
+    func testReadsTheFrontTabFromChromeOrSafari() {
+        script.results["Google Chrome"] = ["https://www.youtube.com/watch?v=abc", "(3) Blender Donut Tutorial - Part 1 - YouTube"]
+        let chrome = BrowserTabReader(runner: script, running: { ["com.google.Chrome"] }).frontTab()
+        XCTAssertEqual(chrome, BrowserTab(url: "https://www.youtube.com/watch?v=abc", title: "Blender Donut Tutorial - Part 1", browser: "com.google.Chrome"))
+        XCTAssertTrue(script.scripts.last?.contains("active tab of front window") ?? false)
+
+        script.results["Safari"] = ["https://www.youtube.com/watch?v=xyz", "Sculpting basics - YouTube"]
+        let safari = BrowserTabReader(runner: script, running: { ["com.apple.Safari", "com.google.Chrome"] }).frontTab()
+        XCTAssertEqual(safari?.title, "Sculpting basics", "the frontmost browser wins")
+        XCTAssertEqual(safari?.browser, "com.apple.Safari")
+
+        XCTAssertNil(BrowserTabReader(runner: script, running: { ["com.apple.finder"] }).frontTab(), "no browser open")
+        script.results["Google Chrome"] = .some(nil)
+        XCTAssertNil(BrowserTabReader(runner: script, running: { ["com.google.Chrome"] }).frontTab(), "permission refused")
+        script.results["Google Chrome"] = ["chrome://newtab/", "New Tab"]
+        XCTAssertNil(BrowserTabReader(runner: script, running: { ["com.google.Chrome"] }).frontTab(), "not a web page")
+        script.results["Google Chrome"] = ["https://example.com/x", ""]
+        XCTAssertEqual(BrowserTabReader(runner: script, running: { ["com.google.Chrome"] }).frontTab()?.title, "https://example.com/x")
+    }
+
+    func testSavingATutorialGoesToTheCurrentProjectOnce() throws {
+        XCTAssertThrowsError(try service.saveTutorial(sessions: module.sessions)) { XCTAssertEqual($0 as? TutorialError, .noProject) }
+        _ = try service.save(Project(name: "Poster", color: "", createdAt: time.now.addingTimeInterval(-100), creative: CreativeInfo()))
+        let robot = try service.save(Project(name: "Robot Model", color: "", creative: CreativeInfo()))
+        service.noteOpened(robot.id)
+        XCTAssertThrowsError(try service.saveTutorial(sessions: module.sessions)) { XCTAssertEqual($0 as? TutorialError, .noTab) }
+
+        script.results["Google Chrome"] = ["https://www.youtube.com/watch?v=abc", "Blender Donut Tutorial - YouTube"]
+        try module.sessions.start(kind: .watch)
+        let saved = try service.saveTutorial(sessions: module.sessions)
+        XCTAssertEqual(saved.project.id, robot.id)
+        _ = try service.saveTutorial(sessions: module.sessions)
+        let links = service.tutorials(of: service.project(id: robot.id))
+        XCTAssertEqual(links.map(\.title), ["Blender Donut Tutorial"], "once per video")
+        XCTAssertEqual(links.first?.kind, .tutorial)
+        XCTAssertTrue(module.roomState().easel?.detail.contains("1 saved tutorial") ?? false)
+
+        time.advance(minutes: 70)
+        let summary = try XCTUnwrap(module.sessions.end())
+        XCTAssertEqual(summary.headline, "1 h 10 m watching · 1 tutorial saved to Robot Model")
+    }
+
+    func testWatchTimeCountsOnlyAsTheSettingSays() throws {
+        let day = service.settings.day
+        let today = day.start(of: time.now)
+        func session(_ kind: CreativeSession.Kind, minutes: Double, daysAgo: Int, tutorials: [String] = []) throws {
+            let start = today.addingTimeInterval(-Double(daysAgo) * 86_400 + 3600)
+            try time.store.saveCreativeSession(CreativeSession(kind: kind, startedAt: start, endedAt: start.addingTimeInterval(minutes * 60),
+                                                               focusedSeconds: minutes * 60, tutorials: tutorials))
+        }
+        try session(.watch, minutes: 60, daysAgo: 0)
+        try session(.watch, minutes: 45, daysAgo: 1, tutorials: ["https://youtu.be/a"])
+        try session(.create, minutes: 40, daysAgo: 2)
+        XCTAssertEqual(module.sessions.createdToday(), 0, "watching isn't creating, by default")
+        XCTAssertEqual(module.sessions.streak(), 0)
+        service.settings.countWatchTime = .tutorials
+        XCTAssertEqual(module.sessions.createdToday(), 0, "no tutorial saved today")
+        XCTAssertEqual(module.sessions.streak(), 2, "yesterday's watching saved a tutorial")
+        service.settings.countWatchTime = .always
+        XCTAssertEqual(module.sessions.createdToday(), 60 * 60)
+        XCTAssertEqual(module.sessions.streak(), 3)
+        XCTAssertTrue(module.sessions.weeklyHours().contains { $0.kind == .watch }, "the Stats panel shows it separately")
+    }
+
+    func testStartWatchOpensYouTubeInItsOwnWindowAndStartsASession() async throws {
+        script.results["Google Chrome"] = ["ok"]
+        let run = await time.core.engine.invoke(StartWatchAction.id, source: "test")
+        XCTAssertNotEqual(run.state, .failed, run.error ?? "")
+        XCTAssertTrue(module.sessions.isWatching)
+        XCTAssertEqual(time.time.focus.session?.title, "Watch · Focus")
+        let opened = try XCTUnwrap(script.scripts.first { $0.contains("make new window") })
+        XCTAssertTrue(opened.contains("https://www.youtube.com/playlist?list=WL"), "Watch Later by default")
+        XCTAssertTrue(module.roomState().isWatching)
+        XCTAssertTrue(module.roomState().dimmed)
+    }
+
+    func testEnteringOffersJustWatchingAndRemembersIt() async throws {
+        let space = try SpaceLibrary(core: time.core).createSpace(from: SpaceTemplates.creativeStudio)
+        try module.automations.install()
+        XCTAssertTrue(try time.store.profiles(spaceID: space.id).contains { $0.name == "Watch" }, "the Watch profile")
+        _ = try service.save(Project(name: "Robot", color: "", creative: CreativeInfo()))
+        let picks = CreativeEventCollector()
+        _ = time.core.events.subscribe(AtlasEvent.Name.creativePickProject) { picks.append($0) }
+        _ = await time.core.engine.invoke(ProjectOnEntryAction.id, parameters: ["space": .string(space.id.uuidString)], source: "test")
+        XCTAssertEqual(picks.values.first?.payload["watch"], true, "one project, but “Just watching” is on offer")
+
+        service.pick(nil)
+        script.results["Google Chrome"] = ["ok"]
+        _ = await time.core.engine.invoke(ProjectOnEntryAction.id, parameters: ["space": .string(space.id.uuidString)], source: "test")
+        XCTAssertEqual(picks.values.count, 1, "remembered for the day")
+        XCTAssertTrue(module.sessions.isWatching, "straight back into Watch mode")
+    }
+
+    @MainActor
+    func testTheTVGlowsAndTheCompanionGrabsPopcorn() throws {
+        let space = Space(name: "Creative Studio", group: .personal, templateID: CreativeLoft.templateID, accentColor: "#E8A6B4", slot: 0)
+        let template = SpaceTemplates.creativeStudio
+        let objects = template.objects.map { SpaceObject(spaceID: space.id, kind: $0.kind, label: $0.label, actionID: $0.actionID) }
+        let room = RoomBuilder.build(space: space, room: template.room, objects: objects, detail: true)
+        let tv = try XCTUnwrap(room.findEntity(named: "creativeitem:tv"))
+        XCTAssertNotNil(tv.components[CollisionComponent.self])
+        func count(_ entity: Entity) -> Int { 1 + entity.children.reduce(0) { $0 + count($1) } }
+        XCTAssertLessThan(count(tv), 10, "under 10 entities")
+        let motion = try XCTUnwrap(room.components[RoomMotionComponent.self]?.motion as? CreativeLoftMotion)
+        var painter = CreativeRoomState.Painter(style: .robot)
+        motion.update(CreativeRoomState(painter: painter))
+        let figure = try XCTUnwrap(motion.parts.painter)
+        XCTAssertFalse(figure.popcorn.isEnabled)
+        painter.isWatching = true
+        var watching = CreativeRoomState(painter: painter)
+        watching.isWatching = true
+        watching.dimmed = true
+        motion.update(watching)
+        XCTAssertTrue(figure.popcorn.isEnabled)
+        XCTAssertFalse(figure.easel.isEnabled)
+        XCTAssertEqual(figure.body.position, CreativeLoftBuilder.Painter.seat, "on the window seat")
+        XCTAssertGreaterThan(motion.parts.tvLight?.light.intensity ?? 0, 0, "the screen glows")
+        XCTAssertEqual(CreativeRoomState.Item(entityName: "creativeitem:tv"), .tv)
+    }
+}

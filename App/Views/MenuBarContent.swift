@@ -25,6 +25,11 @@ struct MenuBarContent: View {
             Divider()
         }
 
+        if model.creative.isWatching, let project = model.creative.currentProject {
+            Button("Save Video to \(project.name)") { model.creative.saveTutorial() }
+            Divider()
+        }
+
         LockdownMenuItems(lockdown: model.lockdown)
 
         if let focus = model.core?.time?.focus {

@@ -22,6 +22,7 @@ public final class CreativeModule: @unchecked Sendable {
             OpenInspirationAction(service: service), OpenAssetsAction(service: service),
             OfferStudioAction(service: service), ProjectOnEntryAction(service: service), StaleNudgeAction(service: service),
             WeeklyRecapAction(service: service),
+            StartWatchAction(service: service, sessions: sessions), SaveTutorialAction(service: service, sessions: sessions),
         ]
         for action in actions where core.registry.descriptor(for: action.descriptor.id) == nil {
             try core.registry.register(action)
@@ -37,6 +38,20 @@ public final class CreativeModule: @unchecked Sendable {
         state.jars = service.jarColors()
         state.shelvesDetail = "Today's paint: " + state.jars.joined(separator: " ") + " · click for the project's assets"
         state.gallery = service.gallery()
+        state.isWatching = sessions.isWatching
+        state.dimmed = state.isWatching && service.settings.dimWhileWatching
+        if state.isWatching {
+            let watched = CreativeMath.duration(sessions.focusedSeconds())
+            state.tvDetail = "Watching · \(watched) · click to stop" + (service.currentProject().map { " · Save to project saves videos to \($0.name)" } ?? "")
+        } else {
+            state.tvDetail = "Click to watch (YouTube in its own window)"
+        }
+        if let project = service.currentProject(), !service.tutorials(of: project).isEmpty, var easel = state.easel {
+            let count = service.tutorials(of: project).count
+            easel.detail = easel.detail.replacingOccurrences(of: "\nClick to open",
+                                                            with: " · \(count) saved tutorial\(count == 1 ? "" : "s")\nClick to open")
+            state.easel = easel
+        }
         state.rug = sessions.rug()
         state.streak = sessions.streak()
         let days = state.rug.count

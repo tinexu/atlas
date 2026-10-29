@@ -41,6 +41,48 @@ public struct CreativeSettings: Codable, Equatable, Sendable {
     /// The project picker's choice for today, when more than one project is active.
     public var pickedToday: PickedProject?
 
+    // Watch mode
+    /// The Watch profile and "Just watching" in the project picker.
+    public var watchEnabled = true
+    public var watchStartPage: WatchStartPage = .watchLater
+    /// Also open the current project when watching.
+    public var watchOpensProject = false
+    /// A notes app small on the right, for jotting ideas.
+    public var watchWithNotes = false
+    public var watchNotesApp = "com.apple.Notes"
+    /// Play this playlist too (off by default: the video has sound).
+    public var watchMusic = false
+    public var watchPlaylist = ""
+    /// The room dims to a warm evening look while watching.
+    public var dimWhileWatching = true
+    public var countWatchTime: WatchCounting = .never
+    /// The Companion sits on the window seat with popcorn.
+    public var popcorn = true
+    /// Where YouTube opens.
+    public var watchBrowser = "com.google.Chrome"
+
+    public enum WatchStartPage: String, Codable, CaseIterable, Sendable {
+        case watchLater, home
+        public var url: String {
+            self == .watchLater ? "https://www.youtube.com/playlist?list=WL" : "https://www.youtube.com"
+        }
+        public var title: String { self == .watchLater ? "Watch Later" : "Home page" }
+    }
+
+    /// Whether watch time counts as creative time (streak, rug, today).
+    public enum WatchCounting: String, Codable, CaseIterable, Sendable {
+        case never, always
+        /// Only sessions where you saved a tutorial to a project.
+        case tutorials
+        public var title: String {
+            switch self {
+            case .never: return "No"
+            case .always: return "Yes, all of it"
+            case .tutorials: return "Only when I saved a tutorial"
+            }
+        }
+    }
+
     public struct PickedProject: Codable, Equatable, Sendable {
         public var day: Date
         /// Nil: "Just watching".
@@ -75,6 +117,17 @@ public struct CreativeSettings: Codable, Equatable, Sendable {
         companionPaints = try c.decodeIfPresent(Bool.self, forKey: .companionPaints) ?? defaults.companionPaints
         quietDuringSessions = try c.decodeIfPresent(Bool.self, forKey: .quietDuringSessions) ?? defaults.quietDuringSessions
         pickedToday = try c.decodeIfPresent(PickedProject.self, forKey: .pickedToday)
+        watchEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchEnabled) ?? defaults.watchEnabled
+        watchStartPage = try c.decodeIfPresent(WatchStartPage.self, forKey: .watchStartPage) ?? defaults.watchStartPage
+        watchOpensProject = try c.decodeIfPresent(Bool.self, forKey: .watchOpensProject) ?? defaults.watchOpensProject
+        watchWithNotes = try c.decodeIfPresent(Bool.self, forKey: .watchWithNotes) ?? defaults.watchWithNotes
+        watchNotesApp = try c.decodeIfPresent(String.self, forKey: .watchNotesApp) ?? defaults.watchNotesApp
+        watchMusic = try c.decodeIfPresent(Bool.self, forKey: .watchMusic) ?? defaults.watchMusic
+        watchPlaylist = try c.decodeIfPresent(String.self, forKey: .watchPlaylist) ?? defaults.watchPlaylist
+        dimWhileWatching = try c.decodeIfPresent(Bool.self, forKey: .dimWhileWatching) ?? defaults.dimWhileWatching
+        countWatchTime = try c.decodeIfPresent(WatchCounting.self, forKey: .countWatchTime) ?? defaults.countWatchTime
+        popcorn = try c.decodeIfPresent(Bool.self, forKey: .popcorn) ?? defaults.popcorn
+        watchBrowser = try c.decodeIfPresent(String.self, forKey: .watchBrowser) ?? defaults.watchBrowser
     }
 }
 
@@ -103,6 +156,9 @@ public final class CreativeService: @unchecked Sendable {
     var now: @Sendable () -> Date = { Date() }
     var fileManager: FileManager = .default
     var isInstalled: (String) -> Bool = { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
+    /// AppleScript (new browser windows) and the browser's current tab; stand-ins in tests.
+    var scriptRunner: AppleScriptRunning = NSAppleScriptRunner()
+    var tabReader = BrowserTabReader()
 
     init(core: AtlasCore, thumbnails: ProjectThumbnails = ProjectThumbnails()) {
         self.core = core

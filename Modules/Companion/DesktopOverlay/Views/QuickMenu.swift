@@ -47,6 +47,9 @@ struct QuickMenu {
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
+        let extras = controller.host.extraMenuItems()
+        for item in extras { menu.addItem(ClosureMenuItem(item.title, symbol: item.symbol, handler: item.action)) }
+        if !extras.isEmpty { menu.addItem(.separator()) }
 
         // Spaces, with the active one checked.
         let spaces = NSMenu()

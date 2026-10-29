@@ -57,7 +57,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSRemindersUsageDescription</key>
     <string>ATLAS reads the Reminders list you choose as assignments for the Study Library.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>ATLAS sends commands to apps you include in your automations, such as telling Terminal which folder to open.</string>
+    <string>ATLAS sends commands to apps you include in your automations, such as telling Terminal which folder to open, and reads the address of your browser's current tab when you save a video to a creative project.</string>
 </dict>
 </plist>
 PLIST

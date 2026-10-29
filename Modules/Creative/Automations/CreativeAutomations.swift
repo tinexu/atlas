@@ -65,6 +65,26 @@ public final class CreativeAutomations: @unchecked Sendable {
             ids[kind] = try core.save(Self.workflow(kind)).id
         }
         installed = ids
+        try addWatchProfile()
+    }
+
+    static let watchProfileName = "Watch"
+
+    /// A "Watch" profile on each Creative Studio (once: one you delete stays deleted).
+    func addWatchProfile() throws {
+        let library = SpaceLibrary(core: core)
+        for space in try store.spaces() where space.templateID == CreativeLoft.templateID {
+            let key = "creative.watchProfile.\(space.id.uuidString)"
+            guard (try? store.preference(key, as: Bool.self)) != true else { continue }
+            if !(try store.profiles(spaceID: space.id)).contains(where: { $0.name == Self.watchProfileName }) {
+                let workflow = try core.save(Workflow(
+                    name: "\(space.name) · \(Self.watchProfileName)", summary: "YouTube in its own window, and a watch session.",
+                    failurePolicy: .continueOnFailure, steps: [WorkflowStep(actionID: StartWatchAction.id, label: "Open YouTube")]
+                ))
+                try library.addProfile(to: space.id, name: Self.watchProfileName, workflowID: workflow.id)
+            }
+            try store.setPreference(true, for: key)
+        }
     }
 
     public func setEnabled(_ enabled: Bool, _ kind: Kind) throws {
@@ -192,15 +212,21 @@ struct ProjectOnEntryAction: AtlasAction {
             return ActionOutput("Not the Creative Studio")
         }
         if let picked = service.pickToday {
-            guard let projectID = picked.projectID else { return ActionOutput("Just watching today") }
+            guard let projectID = picked.projectID else {
+                // "Just watching" earlier today: straight back into Watch mode.
+                return try await CreativeFileRules.run(StartWatchAction.id, [:], registry: service.core.registry, context: context)
+            }
             return try await OpenCreativeProjectAction(service: service).perform(["project": .string(projectID.uuidString)], context: context)
         }
         let active = service.recentlyActive()
-        if active.count > 1 {
+        let choices = active.isEmpty ? [service.currentProject()].compactMap { $0 } : active
+        // Several active projects, or Watch mode on (so "Just watching" is one click away).
+        if active.count > 1 || (service.settings.watchEnabled && !choices.isEmpty) {
             service.core.events.publish(AtlasEvent(AtlasEvent.Name.creativePickProject, payload: [
-                "projectIds": .string(active.map(\.id.uuidString).joined(separator: ",")), "spaceId": .string(id.uuidString),
+                "projectIds": .string(choices.map(\.id.uuidString).joined(separator: ",")), "spaceId": .string(id.uuidString),
+                "watch": .bool(service.settings.watchEnabled),
             ]))
-            return ActionOutput("Asked which project: \(active.map(\.name).joined(separator: ", "))")
+            return ActionOutput("Asked which project: \(choices.map(\.name).joined(separator: ", "))")
         }
         guard service.currentProject() != nil else { return ActionOutput("No project yet") }
         return try await OpenCreativeProjectAction(service: service).perform([:], context: context)

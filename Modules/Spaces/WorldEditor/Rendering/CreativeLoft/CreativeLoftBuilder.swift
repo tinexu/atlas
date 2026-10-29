@@ -116,6 +116,7 @@ enum CreativeLoftBuilder {
             buildJars(m, into: loft, parts: &parts)
             buildLiveWindow(m, into: loft, parts: &parts)
             parts.rugContent = buildRugItem(into: loft)
+            buildTV(m, into: loft, parts: &parts)
             let gallery = Entity()
             gallery.name = "galleryContent"
             loft.addChild(gallery)
@@ -229,6 +230,7 @@ enum CreativeLoftBuilder {
         fill.light.attenuationRadius = 5 * scale
         fill.position = [0.4, 2.2, 1.2]
         loft.addChild(fill)
+        parts.fillLight = fill
 
         let neon = PointLight()
         neon.light.color = NSColor(atlasHex: palette.neonPink)
@@ -563,6 +565,10 @@ struct CreativeLoftParts {
     /// Where clouds, rain, snow and the painter are added when first needed.
     weak var room: Entity?
     var painter: CreativeLoftBuilder.PainterParts?
+    /// The TV's screen and its glow; the fill light (dimmed for Watch mode).
+    var tvScreen: ModelEntity?
+    var tvLight: PointLight?
+    var fillLight: PointLight?
     var steam: [Entity] = []
     var pendantLight: PointLight?
 }

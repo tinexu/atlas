@@ -29,6 +29,19 @@ public struct CompanionHost {
     public var holdsSuggestionsWhileStudying: () -> Bool = { true }
     /// Whether offers wait for a creative session's end (the Creative Studio's setting).
     public var holdsSuggestionsWhileCreating: () -> Bool = { true }
+    /// Items at the top of the quick menu right now (e.g. "Save Video to Robot").
+    public var extraMenuItems: () -> [MenuItem] = { [] }
+
+    public struct MenuItem {
+        public let title: String
+        public let symbol: String
+        public let action: () -> Void
+        public init(title: String, symbol: String, action: @escaping () -> Void) {
+            self.title = title
+            self.symbol = symbol
+            self.action = action
+        }
+    }
 
     public init() {}
 }
@@ -294,7 +307,10 @@ public final class CompanionController: ObservableObject {
         bubbleWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                if self?.bubble?.id == bubble.id { self?.bubble = nil }
+                guard let self, self.bubble?.id == bubble.id else { return }
+                self.bubble = nil
+                // A held suggestion faded unanswered: the next one follows, so none linger.
+                if bubble.suggestion != nil { self.showNextHeldSoon() }
             }
         }
         bubbleWork = work

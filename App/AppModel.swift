@@ -310,6 +310,10 @@ final class AppModel: ObservableObject {
         host.describeAutomation = { [weak self] prompt in self?.describeAutomation(prompt) }
         host.holdsSuggestionsWhileStudying = { [weak self] in self?.study.settings.holdSuggestions ?? true }
         host.holdsSuggestionsWhileCreating = { [weak self] in self?.creative.settings.quietDuringSessions ?? true }
+        host.extraMenuItems = { [weak self] in
+            guard let self, self.creative.isWatching, let project = self.creative.currentProject else { return [] }
+            return [CompanionHost.MenuItem(title: "Save Video to \(project.name)", symbol: "bookmark") { [weak self] in self?.creative.saveTutorial() }]
+        }
         companion.host = host
         companion.start()
         connectReader(companion)
@@ -342,9 +346,14 @@ final class AppModel: ObservableObject {
             let detail = companion.isCreativeFocus
                 ? (waiting > 0 ? "Painting quietly · \(waiting) thing\(waiting == 1 ? "" : "s") waiting for the end of your session" : "Painting quietly while you create")
                 : (waiting > 0 ? "\(waiting) suggestion\(waiting == 1 ? "" : "s") waiting · click to see" : "Painting · click for anything waiting")
-            return CreativeRoomState.Painter(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
-                                             isFocused: companion.isCreativeFocus, bounces: self.creative.service?.exportsSaved ?? 0,
-                                             waiting: waiting, detail: detail)
+            var painter = CreativeRoomState.Painter(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
+                                                    isFocused: companion.isCreativeFocus, bounces: self.creative.service?.exportsSaved ?? 0,
+                                                    waiting: waiting, detail: detail)
+            if self.creative.isWatching && self.creative.settings.popcorn {
+                painter.isWatching = true
+                painter.detail = "Watching with you · popcorn"
+            }
+            return painter
         }
         creative.onPainterClicked = { [weak companion] in companion?.showHeld(sayIfNone: true) }
         readerWatch = companion.$held.map(\.count).removeDuplicates().combineLatest(

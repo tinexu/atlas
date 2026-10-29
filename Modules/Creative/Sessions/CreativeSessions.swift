@@ -134,13 +134,39 @@ public final class CreativeSessions: @unchecked Sendable {
 
     // MARK: - Stats
 
+    /// Whether a session counts as creative time: making things always;
+    /// watching only as the setting says.
+    func counts(_ session: CreativeSession) -> Bool {
+        switch session.kind {
+        case .create: return true
+        case .watch:
+            switch service.settings.countWatchTime {
+            case .never: return false
+            case .always: return true
+            case .tutorials: return !session.tutorials.isEmpty
+            }
+        }
+    }
+
+    public var isWatching: Bool { current?.kind == .watch }
+
+    /// A tutorial saved during the running session (for the summary).
+    func noteTutorial(_ url: String) {
+        lock.withLock {
+            guard active != nil, !(active?.session.tutorials.contains(url) ?? true) else { return }
+            active?.session.tutorials.append(url)
+        }
+        save()
+    }
+
+
     /// Creating time today (the day boundary applies), including the running session.
     public func createdToday() -> TimeInterval {
         let day = service.settings.day
         let start = day.start(of: now)
         let done = ((try? store.creativeSessions(in: DateInterval(start: start, end: day.next(after: start)))) ?? [])
-            .filter { $0.kind == .create }.reduce(0) { $0 + $1.focusedSeconds }
-        let running = current.map { $0.kind == .create && $0.startedAt >= start ? focusedSeconds() : 0 } ?? 0
+            .filter(counts).reduce(0) { $0 + $1.focusedSeconds }
+        let running = current.map { counts($0) && $0.startedAt >= start ? focusedSeconds() : 0 } ?? 0
         return done + running
     }
 
@@ -150,10 +176,10 @@ public final class CreativeSessions: @unchecked Sendable {
         let day = settings.day
         var totals: [Date: TimeInterval] = [:]
         let since = day.start(of: now).addingTimeInterval(-400 * 86_400)
-        for session in (try? store.creativeSessions(in: DateInterval(start: since, end: now.addingTimeInterval(1)))) ?? [] where session.kind == .create {
+        for session in (try? store.creativeSessions(in: DateInterval(start: since, end: now.addingTimeInterval(1)))) ?? [] where counts(session) {
             totals[day.start(of: session.startedAt), default: 0] += session.focusedSeconds
         }
-        if let current, current.kind == .create, current.startedAt >= day.start(of: now) {
+        if let current, counts(current), current.startedAt >= day.start(of: now) {
             totals[day.start(of: now), default: 0] += focusedSeconds()
         }
         return Streaks.count(totals: totals, now: now, day: day, minimum: Double(settings.streakMinutes) * 60)
@@ -184,7 +210,7 @@ public final class CreativeSessions: @unchecked Sendable {
         var totals: [Int: TimeInterval] = [:]
         var colors: [Int: String] = [:]
         let sessions = (try? store.creativeSessions(in: range)) ?? []
-        for session in sessions where session.kind == .create {
+        for session in sessions where counts(session) {
             let dayStart = day.start(of: session.startedAt)
             let number = calendar.component(.day, from: dayStart)
             totals[number, default: 0] += session.focusedSeconds
@@ -192,7 +218,7 @@ public final class CreativeSessions: @unchecked Sendable {
                 colors[number] = session.palette.first ?? colors[number]
             }
         }
-        if let current, current.kind == .create, range.contains(current.startedAt) {
+        if let current, counts(current), range.contains(current.startedAt) {
             totals[calendar.component(.day, from: day.start(of: now)), default: 0] += focusedSeconds()
         }
         let minimum = Double(settings.streakMinutes) * 60
@@ -275,11 +301,12 @@ public final class CreativeSessions: @unchecked Sendable {
         try? store.saveCreativeSession(session)
         try? store.setPreference(Active?.none, for: Self.activeKey)
 
-        let summary = CreativeSummary(
+        var summary = CreativeSummary(
             sessionID: session.id, kind: session.kind, focusedSeconds: session.focusedSeconds, projectName: project?.name,
             exports: session.exports.count, references: session.references.count, streak: streak(),
             latestExport: latestExport, palette: session.palette, endedEarly: early
         )
+        summary.tutorials = session.tutorials.count
         lock.withLock {
             _lastSummary = summary
             _finished += 1

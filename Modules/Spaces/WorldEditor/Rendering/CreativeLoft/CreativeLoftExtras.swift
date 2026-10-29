@@ -289,6 +289,9 @@ extension CreativeLoftBuilder {
         static let figureYaw: Float = 1.0
         static let focusAccent = "#818CF8"
         static let idleAccent = "#7DD3FC"
+        /// Watching: on the window seat, turned towards the TV.
+        static let seat = SIMD3<Float>(0.75, 0.52, -1.2)
+        static let seatYaw: Float = -0.9
     }
 
     struct PainterParts {
@@ -297,6 +300,9 @@ extension CreativeLoftBuilder {
         let arm: Entity
         let eyes: [ModelEntity]
         let dot: ModelEntity
+        /// The tiny easel (hidden while watching) and the popcorn bowl (shown).
+        let easel: Entity
+        let popcorn: Entity
     }
 
     /// A small Companion in your colours at a tiny easel, holding a brush.
@@ -304,6 +310,7 @@ extension CreativeLoftBuilder {
         let container = Entity()
         container.name = CreativeRoomState.Item.painter.entityName
         // The tiny easel: three legs and a small canvas with a few strokes.
+        let easelEntity = Entity()
         let easel = Batches<LoftMaterial>(m)
         let e = Painter.easel
         let turn = simd_quatf(angle: Painter.easelYaw, axis: [0, 1, 0])
@@ -319,7 +326,8 @@ extension CreativeLoftBuilder {
             easel.add(.paint(hex), LoftShapes.unitSphere, at: e + turn.act([offset.x, 0.37 + offset.y, 0.038]), rotation: turn,
                       scale: [0.045, 0.03, 0.003])
         }
-        easel.flush(into: container)
+        easel.flush(into: easelEntity)
+        container.addChild(easelEntity)
 
         // The figure, standing at the floor.
         let body = Entity()
@@ -369,14 +377,27 @@ extension CreativeLoftBuilder {
         armBatch.add(.paint(CreativeLoftPalette.current.berry), LoftShapes.unitSphere, at: [0.03, 0.06, 0.13], scale: SIMD3(repeating: 0.008))
         armBatch.flush(into: arm)
         body.addChild(arm)
-        let dot = ModelEntity(mesh: .generateSphere(radius: 0.012), materials: [CreativeLoftMaterials.glow("#FFD27A", intensity: 1.6)])
-        dot.position = [0, top + 0.05, 0]
+        // A small amber light beside its head: suggestions are waiting
+        // (dim enough to stay amber rather than glare white).
+        let dot = ModelEntity(mesh: .generateSphere(radius: 0.008), materials: [CreativeLoftMaterials.glow("#F2A03D", intensity: 0.6)])
+        dot.position = [0.07, top + 0.03, 0]
         dot.isEnabled = painter.waiting > 0 && !painter.isFocused
         body.addChild(dot)
+        // A bowl of popcorn for Watch mode, held in front.
+        let popcorn = Entity()
+        popcorn.position = [0, 0.1, 0.11]
+        let bowl = Batches<LoftMaterial>(m)
+        bowl.add(.paint(CreativeLoftPalette.current.rose), .generateCylinder(height: 0.035, radius: 0.045), at: [0, 0, 0])
+        for (index, offset) in [SIMD3<Float>(-0.02, 0.025, 0), [0.018, 0.027, 0.01], [0, 0.03, -0.015], [0.01, 0.038, 0], [-0.012, 0.035, 0.014]].enumerated() {
+            bowl.add(.cream, LoftShapes.unitSphere, at: offset, scale: SIMD3(repeating: 0.012 + Float(index % 2) * 0.002))
+        }
+        bowl.flush(into: popcorn)
+        popcorn.isEnabled = false
+        body.addChild(popcorn)
         container.addChild(body)
         loft.addChild(container)
         RoomBuilder.makeInteractive(container)
-        return PainterParts(container: container, body: body, arm: arm, eyes: eyeEntities, dot: dot)
+        return PainterParts(container: container, body: body, arm: arm, eyes: eyeEntities, dot: dot, easel: easelEntity, popcorn: popcorn)
     }
 }
 
@@ -418,5 +439,71 @@ struct LoftRandom: RandomNumberGenerator {
     mutating func next() -> UInt64 {
         state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
         return state ^ (state >> 29)
+    }
+}
+
+// MARK: - The TV (Watch mode)
+
+extension CreativeLoftBuilder {
+    enum TV {
+        /// On a low round table between the desk and the window seat, turned so
+        /// both the room and the window seat can see the screen.
+        static let base = SIMD3<Float>(0.15, 0, -0.72)
+        static let yaw: Float = 0.93
+        static let tableTop: Float = 0.4
+        static let body = SIMD3<Float>(0.26, 0.2, 0.18)
+        static let screen = SIMD2<Float>(0.19, 0.14)
+        static let screenOff = "#2B2633"
+        static let screenOn = "#BFD7FF"
+    }
+
+    /// A rounded cream TV with a brass antenna on a little table: under 10
+    /// entities. The screen glows (and the motion flickers it) while watching.
+    static func buildTV(_ m: CreativeLoftMaterials, into loft: Entity, parts: inout CreativeLoftParts) {
+        let container = Entity()
+        container.name = CreativeRoomState.Item.tv.entityName
+        container.position = TV.base
+        container.orientation = simd_quatf(angle: TV.yaw, axis: [0, 1, 0])
+        let shape = Batches<LoftMaterial>(m)
+        // Table.
+        shape.add(.wood, .generateCylinder(height: 0.03, radius: 0.18), at: [0, TV.tableTop - 0.015, 0])
+        shape.add(.brass, .generateCylinder(height: TV.tableTop - 0.03, radius: 0.012), at: [0, (TV.tableTop - 0.03) / 2, 0])
+        shape.add(.brass, .generateCylinder(height: 0.012, radius: 0.1), at: [0, 0.006, 0])
+        // Body, feet, bezel and knobs.
+        let centre = SIMD3<Float>(0, TV.tableTop + 0.02 + TV.body.y / 2, 0)
+        shape.add(.cream, rbox(TV.body.x, TV.body.y, TV.body.z, 0.04), at: centre)
+        for x: Float in [-0.09, 0.09] {
+            shape.add(.brass, .generateCylinder(height: 0.02, radius: 0.012), at: [x, TV.tableTop + 0.01, 0.04])
+        }
+        shape.add(.mauveDark, rbox(TV.screen.x + 0.025, TV.screen.y + 0.025, 0.01, 0.02), at: centre + [-0.02, 0, TV.body.z / 2 - 0.002])
+        for y: Float in [0.03, -0.03] {
+            shape.add(.brass, .generateCylinder(height: 0.012, radius: 0.01), at: centre + [0.105, y, TV.body.z / 2 + 0.004],
+                      rotation: simd_quatf(angle: .pi / 2, axis: [1, 0, 0]))
+        }
+        // Antenna: two brass rods in a V, with little balls.
+        let top = centre + [0, TV.body.y / 2, -0.02]
+        for angle: Float in [0.45, -0.45] {
+            let rotation = simd_quatf(angle: angle, axis: [0, 0, 1])
+            shape.add(.brass, .generateCylinder(height: 0.17, radius: 0.003), at: top + rotation.act([0, 0.085, 0]), rotation: rotation)
+            shape.add(.brass, LoftShapes.unitSphere, at: top + rotation.act([0, 0.17, 0]), scale: SIMD3(repeating: 0.008))
+        }
+        shape.flush(into: container)
+        let screen = ModelEntity(mesh: .generatePlane(width: TV.screen.x, height: TV.screen.y, cornerRadius: 0.015),
+                                 materials: [m.paint(TV.screenOff)])
+        screen.position = centre + [-0.02, 0, TV.body.z / 2 + 0.0045]
+        screen.components.set(OpacityComponent(opacity: 1))
+        container.addChild(screen)
+        loft.addChild(container)
+        RoomBuilder.makeInteractive(container)
+        parts.tvScreen = screen
+
+        // A soft bluish glow from the screen, off until watching.
+        let glow = PointLight()
+        glow.light.color = NSColor(atlasHex: TV.screenOn)
+        glow.light.intensity = 0
+        glow.light.attenuationRadius = 0.9 * scale
+        glow.position = TV.base + simd_quatf(angle: TV.yaw, axis: [0, 1, 0]).act(centre + [0, 0, 0.25])
+        loft.addChild(glow)
+        parts.tvLight = glow
     }
 }

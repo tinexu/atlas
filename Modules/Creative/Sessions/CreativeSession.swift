@@ -55,9 +55,20 @@ public struct CreativeSummary: Codable, Equatable, Sendable {
     public var latestExport: String?
     public var palette: [String]
     public var endedEarly: Bool
+    /// Tutorials saved to the project while watching.
+    public var tutorials: Int?
 
-    /// "1 h 55 m creating · Poster Series · 4 exports · 6 references saved · streak 3 days"
+    /// "1 h 55 m creating · Poster Series · 4 exports · 6 references saved · streak 3 days",
+    /// or "1 h 10 m watching · 2 tutorials saved to Robot Model".
     public var headline: String {
+        if kind == .watch {
+            let saved = tutorials ?? 0
+            var line = "\(CreativeMath.duration(focusedSeconds)) watching"
+            if saved > 0 {
+                line += " · \(saved) tutorial\(saved == 1 ? "" : "s") saved" + (projectName.map { " to \($0)" } ?? "")
+            }
+            return line
+        }
         var parts = ["\(CreativeMath.duration(focusedSeconds)) \(kind == .watch ? "watching" : "creating")"]
         if let projectName { parts.append(projectName) }
         if exports > 0 { parts.append("\(exports) export\(exports == 1 ? "" : "s")") }

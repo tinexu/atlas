@@ -122,6 +122,7 @@ final class CreativeModel: ObservableObject {
         if event.name == AtlasEvent.Name.creativePickProject {
             let ids = (event.payload["projectIds"]?.stringValue ?? "").split(separator: ",").compactMap { UUID(uuidString: String($0)) }
             pickerChoices = ids.compactMap { id in projects.first { $0.id == id } }
+            pickerOffersWatching = event.payload["watch"]?.boolValue == true
             showCard(ProjectPickerView())
         }
         if event.name == AtlasEvent.Name.creativeSessionEnded {
@@ -235,17 +236,68 @@ final class CreativeModel: ObservableObject {
         }
     }
 
+    // MARK: - Watch mode
+
+    var isWatching: Bool { sessions?.isWatching ?? false }
+
+    /// The TV: start Watch mode, or stop it.
+    func toggleWatch() {
+        if isWatching {
+            sessions?.end(early: true)
+        } else {
+            invoke(StartWatchAction.id, source: "creative.tv")
+        }
+        reload()
+    }
+
+    /// "Save to project": the browser's current video into the current
+    /// project's Tutorials. The first time, explains why macOS will ask.
+    func saveTutorial() {
+        guard let core else { return }
+        let key = "creative.automationExplained"
+        if (try? core.store.preference(key, as: Bool.self)) != true {
+            let alert = NSAlert()
+            alert.messageText = "Save videos to your projects"
+            alert.informativeText = "To save the video you're watching, ATLAS asks your browser (Chrome or Safari) for the address and title of its current tab. macOS will ask once whether ATLAS may control your browser; nothing else is read or changed. You can change this in System Settings → Privacy & Security → Automation."
+            alert.addButton(withTitle: "Continue")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            try? core.store.setPreference(true, for: key)
+        }
+        Task {
+            _ = await core.engine.invoke(SaveTutorialAction.id, source: RunTrigger.companion)
+            reload()
+        }
+    }
+
+    /// Opens one of the current project's saved tutorials.
+    func openTutorial(_ link: CreativeInfo.Link) {
+        guard let url = URL(string: link.url) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    var tutorials: [CreativeInfo.Link] { service?.tutorials() ?? [] }
+
     // MARK: - Project picker
 
     /// Projects active in the last 24 hours, offered when entering.
     @Published private(set) var pickerChoices: [Project] = []
 
-    /// Picks today's project (remembered for the day) and opens it.
+    /// Whether the picker offers "Just watching".
+    @Published private(set) var pickerOffersWatching = false
+
+    /// Picks today's project (remembered for the day) and opens it; nil is
+    /// "Just watching" (Watch mode).
     func pick(_ project: Project?) {
         service?.pick(project?.id)
         closeCard()
         reload()
-        if project != nil { invoke(OpenCreativeProjectAction.id, source: "creative.picker") }
+        if project != nil {
+            invoke(OpenCreativeProjectAction.id, source: "creative.picker")
+        } else if !isWatching {
+            invoke(StartWatchAction.id, source: "creative.picker")
+        }
     }
 
     var automations: CreativeAutomations? { module?.automations }
@@ -270,6 +322,8 @@ final class CreativeModel: ObservableObject {
             showStats()
         case .painter:
             onPainterClicked?()
+        case .tv:
+            toggleWatch()
         case .frame(let projectID):
             guard let core, let project = projects.first(where: { $0.id == projectID }),
                   let folder = project.creative?.resolvedExportsFolder ?? project.creative?.folder else { return }

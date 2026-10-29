@@ -117,6 +117,16 @@ struct ProjectSwitcherView: View {
                     ForEach(creative.activeProjects) { project in tile(project) }
                 }
             }
+            if !creative.tutorials.isEmpty {
+                Divider()
+                Text("Saved tutorials").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(creative.tutorials) { link in
+                    Button { creative.openTutorial(link) } label: {
+                        Label(link.title.isEmpty ? link.url : link.title, systemImage: "play.rectangle").lineLimit(1)
+                    }
+                    .buttonStyle(.link)
+                }
+            }
             HStack {
                 if let current = creative.currentProject {
                     Toggle("Pin \(current.name)", isOn: Binding(get: { creative.settings.pinnedProjectID == current.id },

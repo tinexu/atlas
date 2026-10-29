@@ -97,6 +97,12 @@ final class CreativeLoftMotion: RoomMotion {
             streakGlow = creative.streak >= 7
             applyNeon()
         }
+        if lastCreative?.dimmed != creative.dimmed {
+            dimmed = creative.dimmed
+            applyLighting()
+            applyNeon()
+        }
+        if lastCreative?.isWatching != creative.isWatching { applyTV(on: creative.isWatching) }
         if lastCreative?.painter != creative.painter { applyPainter(creative.painter, previous: lastCreative?.painter) }
         if lastCreative?.jars != creative.jars, let m = parts.materials {
             for (body, hex) in zip(parts.jarBodies, creative.jars) { body.model?.materials = [m.paint(hex)] }
@@ -144,6 +150,7 @@ final class CreativeLoftMotion: RoomMotion {
     /// Brighter while a session runs, and a little more on a 7-day streak.
     private func applyNeon() {
         parts.neonLight?.light.intensity = CreativeLoftPalette.current.neonLightIntensity * (sessionGlow ? 1.8 : 1) * (streakGlow ? 1.4 : 1)
+            * (dimmed ? 1.3 : 1)
     }
 
     // MARK: Window
@@ -154,12 +161,8 @@ final class CreativeLoftMotion: RoomMotion {
         parts.sky?.model?.materials = [CreativeLoftMaterials.sky(W.colors(view))]
         let evening = W.isEvening(view)
         parts.moon?.isEnabled = evening && (view.weather == .clear || view.weather == .clouds)
-        let sun = W.sun(view, warm: palette.warmLight)
-        parts.sunLight?.light.color = NSColor(atlasHex: sun.color)
-        parts.sunLight?.light.intensity = palette.sunIntensity * sun.level
-        // Fairy lights brighter after dark.
-        let bulb = CreativeLoftMaterials.glow(palette.warmLight, intensity: 1.2 * (evening ? 2 : 1))
-        for case let light as ModelEntity in parts.bulbs { light.model?.materials = [bulb] }
+        windowView = view
+        applyLighting()
         guard let room = parts.room else { return }
         let cloudy = view.weather != .clear && view.weather != .fog
         if cloudy && parts.clouds == nil { parts.clouds = CreativeLoftBuilder.buildClouds(into: room) }
@@ -177,6 +180,44 @@ final class CreativeLoftMotion: RoomMotion {
         parts.fog?.isEnabled = view.weather == .fog
         for group in parts.rain { group.isEnabled = view.weather == .rain }
         for group in parts.snow { group.isEnabled = view.weather == .snow }
+    }
+
+    private var windowView: StudyRoomState.WindowView?
+    private var dimmed = false
+
+    /// The sun through the window (by time of day and weather), the fill
+    /// and the fairy lights; Watch mode dims it all to a warm evening.
+    private func applyLighting() {
+        typealias W = CreativeLoftBuilder.LoftWindow
+        let palette = CreativeLoftPalette.current
+        let view = windowView ?? StudyRoomState.WindowView(sky: .golden, weather: .clear)
+        let evening = W.isEvening(view)
+        let sun = W.sun(view, warm: palette.warmLight)
+        parts.sunLight?.light.color = NSColor(atlasHex: dimmed ? "#FFB98A" : sun.color)
+        parts.sunLight?.light.intensity = palette.sunIntensity * sun.level * (dimmed ? 0.35 : 1)
+        parts.fillLight?.light.intensity = palette.fillIntensity * (dimmed ? 0.55 : 1)
+        // Fairy lights brighter after dark, and while watching.
+        let bulb = CreativeLoftMaterials.glow(palette.warmLight, intensity: 1.2 * (evening || dimmed ? 2 : 1))
+        for case let light as ModelEntity in parts.bulbs { light.model?.materials = [bulb] }
+    }
+
+    /// The TV's screen glows (a soft flicker, unless Reduce Motion) while watching.
+    private func applyTV(on: Bool) {
+        typealias TV = CreativeLoftBuilder.TV
+        guard let screen = parts.tvScreen else { return }
+        screen.stopAllAnimations()
+        screen.components.set(OpacityComponent(opacity: 1))
+        if on {
+            screen.model?.materials = [CreativeLoftMaterials.glow(TV.screenOn, intensity: 1.4)]
+            parts.tvLight?.light.intensity = 1_800
+            if started && !reduceMotion {
+                loop(screen, FromToByAnimation<Float>(from: 1, to: 0.82, duration: 0.7, timing: .easeInOut, bindTarget: .opacity,
+                                                      repeatMode: .autoReverse))
+            }
+        } else {
+            screen.model?.materials = [parts.materials?.paint(TV.screenOff) ?? SimpleMaterial()]
+            parts.tvLight?.light.intensity = 0
+        }
     }
 
     /// Rain or snow slides down and fades, each group on its own loop.
@@ -210,6 +251,16 @@ final class CreativeLoftMotion: RoomMotion {
             }
         }
         guard let painter, let figure = parts.painter else { return }
+        if painter.isWatching != (previous?.isWatching ?? false) || figure.popcorn.isEnabled != painter.isWatching {
+            // Watching: onto the window seat with popcorn; otherwise back at the easel.
+            figure.body.position = painter.isWatching ? P.seat : P.base
+            figure.body.orientation = simd_quatf(angle: painter.isWatching ? P.seatYaw : P.figureYaw, axis: [0, 1, 0])
+            figure.easel.isEnabled = !painter.isWatching
+            figure.arm.isEnabled = !painter.isWatching
+            figure.popcorn.isEnabled = painter.isWatching
+            figure.arm.stopAllAnimations()
+            if !painter.isWatching { paint() }
+        }
         let accent = CreativeLoftMaterials.glow(painter.isFocused ? P.focusAccent : P.idleAccent, intensity: 1.2)
         for eye in figure.eyes { eye.model?.materials = [accent] }
         figure.dot.isEnabled = painter.waiting > 0 && !painter.isFocused
