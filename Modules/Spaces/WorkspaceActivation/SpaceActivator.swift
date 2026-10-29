@@ -167,6 +167,7 @@ public actor SpaceActivator {
         if let previousSpaceID, previousSpaceID != space.id {
             var deactivated: ActionParameters = [
                 "spaceId": .string(previousSpaceID.uuidString),
+                "spaceName": .string(((try? store.space(id: previousSpaceID)) ?? nil)?.name ?? ""),
                 "nextSpaceId": .string(space.id.uuidString),
             ]
             if let leaveSnapshotID { deactivated["snapshotId"] = .string(leaveSnapshotID.uuidString) }

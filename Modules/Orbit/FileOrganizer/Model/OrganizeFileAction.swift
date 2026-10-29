@@ -53,6 +53,11 @@ public struct OrganizeFileAction: AtlasAction {
         for other in try store.rules() where other.isEnabled && other.id != rule.id && other.watches(path) {
             if await RuleMatcher.matches(other, path: path, system: context.system) { others.append(other) }
         }
+        // A catch-all steps aside for any rule that matches; catch-alls never compete.
+        if rule.isFallback, let handler = others.first(where: { !$0.isFallback }) {
+            return ActionOutput("Left to “\(handler.name)”", values: ["path": .string(path), "outcome": "skipped"])
+        }
+        others.removeAll(where: \.isFallback)
 
         if rule.effectiveMode == .askFirst || !others.isEmpty {
             let reason: String

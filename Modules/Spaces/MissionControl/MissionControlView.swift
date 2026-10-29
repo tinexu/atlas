@@ -20,6 +20,10 @@ public struct MissionControlView: View {
     let onCourse: (UUID) -> Void
     /// A Study Library item was clicked, or (`true`) long-pressed / right-clicked for its options.
     let onItem: (StudyRoomState.Item, Bool) -> Void
+    /// A room object was long-pressed or right-clicked (the easel's project switcher).
+    let onObjectOptions: (SpaceObject) -> Void
+    /// A Creative Studio item was clicked (a paint jar, a gallery frame).
+    let onCreativeItem: (CreativeRoomState.Item) -> Void
 
     @State private var scene = MissionControlScene()
     @State private var isWindowVisible = true
@@ -38,7 +42,9 @@ public struct MissionControlView: View {
         onActivate: @escaping (UUID) -> Void,
         onObject: @escaping (SpaceObject) -> Void,
         onCourse: @escaping (UUID) -> Void = { _ in },
-        onItem: @escaping (StudyRoomState.Item, Bool) -> Void = { _, _ in }
+        onItem: @escaping (StudyRoomState.Item, Bool) -> Void = { _, _ in },
+        onObjectOptions: @escaping (SpaceObject) -> Void = { _ in },
+        onCreativeItem: @escaping (CreativeRoomState.Item) -> Void = { _ in }
     ) {
         self.rooms = rooms
         self.selection = selection
@@ -47,6 +53,8 @@ public struct MissionControlView: View {
         self.onObject = onObject
         self.onCourse = onCourse
         self.onItem = onItem
+        self.onObjectOptions = onObjectOptions
+        self.onCreativeItem = onCreativeItem
     }
 
     public var body: some View {
@@ -119,6 +127,10 @@ public struct MissionControlView: View {
         .onDisappear(perform: removeScrollMonitor)
     }
 
+    private func object(_ id: UUID, in roomID: UUID) -> SpaceObject? {
+        rooms.first(where: { $0.id == roomID })?.objects.first(where: { $0.id == id })
+    }
+
     /// Lifts and outlines the object under the pointer and names it.
     private func hover(at point: CGPoint?, in size: CGSize) {
         guard let point, lastDrag == .zero, let hit = scene.hover(at: point, in: size, reduceMotion: reduceMotion) else {
@@ -141,7 +153,8 @@ public struct MissionControlView: View {
                 hoverLabel = (count == 0 ? "Nothing due this week · click for all assignments"
                               : "\(count) due this week · click for all assignments", point)
             default:
-                hoverLabel = (object.label.flatMap { $0.isEmpty ? nil : $0 } ?? object.kind.title, point)
+                let creative = rooms.first(where: { $0.id == roomID })?.creative?.detail(for: object.kind)
+                hoverLabel = (creative ?? object.label.flatMap { $0.isEmpty ? nil : $0 } ?? object.kind.title, point)
             }
         case .course(let courseID, let roomID):
             let book = rooms.first(where: { $0.id == roomID })?.study?.books.first(where: { $0.id == courseID })
@@ -149,6 +162,8 @@ public struct MissionControlView: View {
         case .item(let item, let roomID):
             guard let study = rooms.first(where: { $0.id == roomID })?.study else { hoverLabel = nil; return }
             hoverLabel = study.detail(for: item).flatMap { $0.isEmpty ? nil : ($0, point) }
+        case .creative(let item, let roomID):
+            hoverLabel = rooms.first(where: { $0.id == roomID })?.creative?.detail(for: item).map { ($0, point) }
         case .room:
             hoverLabel = nil
         }
@@ -169,7 +184,7 @@ public struct MissionControlView: View {
                     let roomID: UUID
                     switch hit {
                     case .room(let id): roomID = id
-                    case .object(_, let room), .course(_, let room), .item(_, let room): roomID = room
+                    case .object(_, let room), .course(_, let room), .item(_, let room), .creative(_, let room): roomID = room
                     }
                     // Activation first; the fly-to triggered by selecting
                     // runs alongside it.
@@ -190,6 +205,9 @@ public struct MissionControlView: View {
                     case .item(let item, let roomID):
                         onSelect(roomID)
                         onItem(item, false)
+                    case .creative(let item, let roomID):
+                        onSelect(roomID)
+                        onCreativeItem(item)
                     case nil:
                         break
                     }
@@ -201,7 +219,11 @@ public struct MissionControlView: View {
     private var longPress: some Gesture {
         LongPressGesture(minimumDuration: 0.5).targetedToAnyEntity()
             .onEnded { value in
-                if case .item(let item, _) = scene.hit(for: value.entity) { onItem(item, true) }
+                switch scene.hit(for: value.entity) {
+                case .item(let item, _): onItem(item, true)
+                case .object(let objectID, let roomID): object(objectID, in: roomID).map(onObjectOptions)
+                default: break
+                }
             }
     }
 
@@ -231,8 +253,16 @@ public struct MissionControlView: View {
     private func installScrollMonitor() {
         guard scrollMonitor == nil else { return }
         rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { event in
-            guard isHovering, case .item(let item, _)? = scene.hoveredHit else { return event }
-            onItem(item, true)
+            guard isHovering else { return event }
+            switch scene.hoveredHit {
+            case .item(let item, _)?:
+                onItem(item, true)
+            case .object(let objectID, let roomID)?:
+                guard let object = object(objectID, in: roomID) else { return event }
+                onObjectOptions(object)
+            default:
+                return event
+            }
             return nil
         }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in

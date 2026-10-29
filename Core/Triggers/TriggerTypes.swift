@@ -35,6 +35,8 @@ public enum TriggerCatalog {
     public static let folderChanged = "folder.changed"
     public static let hotKey = "hotkey.pressed"
     public static let spaceActivated = "space.activated"
+    /// You switched away from a Space (to another one).
+    public static let spaceDeactivated = "space.deactivated"
     public static let timeReached = "time.reached"
     public static let timerCompleted = "timer.completed"
     public static let displayChanged = "display.changed"
@@ -119,6 +121,18 @@ public enum TriggerCatalog {
                 OutputSpec(key: "profileId", label: "Profile ID", type: .string),
             ],
             reliability: "Fires after the Space's own activation has finished."
+        ),
+        TriggerType(
+            id: spaceDeactivated, title: "Space Left", summary: "When you switch from a Space to another one.",
+            symbolName: "cube.transparent.fill",
+            parameters: [ParameterSpec(key: "space", label: "Space", kind: .text, isRequired: false,
+                                       help: "A Space's name. Leave empty for any Space")],
+            outputs: [
+                OutputSpec(key: "spaceId", label: "Space ID", type: .string),
+                OutputSpec(key: "spaceName", label: "Space name", type: .string),
+                OutputSpec(key: "nextSpaceId", label: "Next Space ID", type: .string),
+            ],
+            reliability: "Fires when another Space is activated."
         ),
         TriggerType(
             id: timeReached, title: "Time Reached", summary: "Every day, on some weekdays, or once, at a time.", symbolName: "clock",

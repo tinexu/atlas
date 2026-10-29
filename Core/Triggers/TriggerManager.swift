@@ -313,7 +313,7 @@ public final class TriggerManager: @unchecked Sendable {
         case TriggerCatalog.woke:
             return [environment.observeWake { fire([:]) }]
 
-        case TriggerCatalog.spaceActivated, TriggerCatalog.displayChanged, TriggerCatalog.timerCompleted, TriggerCatalog.healthWarning,
+        case TriggerCatalog.spaceActivated, TriggerCatalog.spaceDeactivated, TriggerCatalog.displayChanged, TriggerCatalog.timerCompleted, TriggerCatalog.healthWarning,
              TriggerCatalog.blockStarting, TriggerCatalog.blockEnded, TriggerCatalog.focusEnded, TriggerCatalog.calendarEventApproaching:
             // Delivered through the event bus; see `handle(_:)`.
             return []
@@ -427,6 +427,13 @@ public final class TriggerManager: @unchecked Sendable {
                 let name = p["spaceName"]?.stringValue ?? "", id = p["spaceId"]?.stringValue ?? ""
                 guard wanted.isEmpty || wanted.caseInsensitiveCompare(name) == .orderedSame || wanted == id else { return nil }
                 return ["spaceId": .string(id), "spaceName": .string(name), "profileId": p["profileId"] ?? .string("")]
+            }
+        case AtlasEvent.Name.spaceDeactivatedEvent:
+            deliver(TriggerCatalog.spaceDeactivated) { params in
+                let wanted = params["space"]?.stringValue?.trimmingCharacters(in: .whitespaces) ?? ""
+                let name = p["spaceName"]?.stringValue ?? "", id = p["spaceId"]?.stringValue ?? ""
+                guard wanted.isEmpty || wanted.caseInsensitiveCompare(name) == .orderedSame || wanted == id else { return nil }
+                return ["spaceId": .string(id), "spaceName": .string(name), "nextSpaceId": p["nextSpaceId"] ?? .string("")]
             }
         case AtlasEvent.Name.healthThreshold:
             deliver(TriggerCatalog.healthWarning) { params in
@@ -640,4 +647,6 @@ struct TriggerError: Error, LocalizedError {
 extension AtlasEvent.Name {
     /// Spaces publishes `space.activated`; triggers listen for it here.
     public static let spaceActivatedEvent = "space.activated"
+    /// Spaces publishes `space.deactivated` when you switch to another Space.
+    public static let spaceDeactivatedEvent = "space.deactivated"
 }

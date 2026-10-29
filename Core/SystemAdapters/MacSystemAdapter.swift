@@ -158,7 +158,12 @@ public struct MacSystemAdapter: SystemAdapter {
         try await post(title: title, body: body, link: link)
     }
 
-    private func post(title: String, body: String, link: String?) async throws {
+    public func postFileNotification(title: String, body: String, path: String) async throws {
+        try await post(title: title, body: body, link: FileLinks.link("open", path), category: FileLinks.category,
+                       extra: ["atlasLink.open": FileLinks.link("open", path), "atlasLink.show": FileLinks.link("show", path)])
+    }
+
+    private func post(title: String, body: String, link: String?, category: String? = nil, extra: [String: String] = [:]) async throws {
         // UNUserNotificationCenter requires a real app bundle; calling it
         // from a bare `swift run` binary crashes, so check first.
         guard Bundle.main.bundleIdentifier != nil else {
@@ -181,7 +186,10 @@ public struct MacSystemAdapter: SystemAdapter {
         content.title = title
         content.body = body
         content.sound = .default
-        if let link { content.userInfo = ["atlasLink": link] }
+        var info: [String: String] = extra
+        if let link { info["atlasLink"] = link }
+        content.userInfo = info
+        if let category { content.categoryIdentifier = category }
         try await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 

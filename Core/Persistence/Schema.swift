@@ -533,6 +533,27 @@ enum Schema {
         );
         CREATE INDEX idx_study_session_start ON study_session(started_at);
         """,
+        // v10 — Creative Studio: an Orbit project's creative fields (kind,
+        // apps, main files, links, folders, status…) as one JSON column, and
+        // creative sessions ("create" or "watch").
+        """
+        ALTER TABLE project ADD COLUMN creative_json TEXT;
+
+        CREATE TABLE creative_session (
+            id               TEXT PRIMARY KEY,
+            project_id       TEXT REFERENCES project(id) ON DELETE SET NULL,
+            kind             TEXT NOT NULL DEFAULT 'create',
+            started_at       REAL NOT NULL,
+            ended_at         REAL,
+            focused_seconds  REAL NOT NULL DEFAULT 0,
+            exports_json     TEXT NOT NULL DEFAULT '[]',
+            references_json  TEXT NOT NULL DEFAULT '[]',
+            files_json       TEXT NOT NULL DEFAULT '[]',
+            palette_json     TEXT NOT NULL DEFAULT '[]',
+            tutorials_json   TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE INDEX idx_creative_session_start ON creative_session(started_at);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

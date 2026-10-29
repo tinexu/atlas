@@ -112,6 +112,9 @@ public protocol SystemAdapter: Sendable {
     func postNotification(title: String, body: String) async throws
     /// A notification that opens `link` (an atlas:// link) when clicked.
     func postNotification(title: String, body: String, link: String) async throws
+    /// A notification about a file, with Open and Show (in Finder) buttons;
+    /// clicking it opens the file.
+    func postFileNotification(title: String, body: String, path: String) async throws
     func fileKind(atPath path: String) -> FileKind
     /// Bytes, or nil if nothing is there.
     func fileSize(atPath path: String) -> Int64?
@@ -134,6 +137,31 @@ public protocol SystemAdapter: Sendable {
 extension SystemAdapter {
     public func postNotification(title: String, body: String, link: String) async throws {
         try await postNotification(title: title, body: body)
+    }
+
+    public func postFileNotification(title: String, body: String, path: String) async throws {
+        try await postNotification(title: title, body: body)
+    }
+}
+
+/// atlas:// links for a file: "atlas://file/open?path=…" and "atlas://file/show?path=…".
+public enum FileLinks {
+    public static let category = "atlas.file"
+
+    public static func link(_ verb: String, _ path: String) -> String {
+        var components = URLComponents()
+        components.scheme = "atlas"
+        components.host = "file"
+        components.path = "/" + verb
+        components.queryItems = [URLQueryItem(name: "path", value: path)]
+        return components.url?.absoluteString ?? ""
+    }
+
+    /// ("open" or "show", the path) for a file link.
+    public static func parse(_ link: String) -> (verb: String, path: String)? {
+        guard let components = URLComponents(string: link), components.scheme == "atlas", components.host == "file",
+              let path = components.queryItems?.first(where: { $0.name == "path" })?.value else { return nil }
+        return (String(components.path.dropFirst()), path)
     }
 }
 

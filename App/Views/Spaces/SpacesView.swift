@@ -1,4 +1,5 @@
 import AtlasCore
+import AtlasCreative
 import AtlasSpaces
 import AtlasSpacesUI
 import SwiftUI
@@ -8,6 +9,33 @@ import SwiftUI
 struct SpacesView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var spaces: SpacesModel
+
+    /// The 3D world. In the Creative Studio, pictures dropped on it are
+    /// saved to the inspiration folder and pinned on the pegboard.
+    private var world: some View {
+        MissionControlView(
+            rooms: spaces.roomSnapshots,
+            selection: spaces.selectedSpaceID,
+            onSelect: { spaces.selectedSpaceID = $0 },
+            onActivate: { spaces.activate($0) },
+            onObject: { spaces.objectClicked($0) },
+            onCourse: { model.study.open(courseID: $0) },
+            onItem: { model.study.itemClicked($0, options: $1) },
+            onObjectOptions: { spaces.objectOptions($0) },
+            onCreativeItem: { model.creative.itemClicked($0) }
+        )
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard model.creative.isStudioActive else { return false }
+            let creative = model.creative
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, CreativeService.isPicture(url.path) else { return }
+                    Task { @MainActor in creative.dropped([url]) }
+                }
+            }
+            return true
+        }
+    }
 
     var body: some View {
         Group {
@@ -27,16 +55,8 @@ struct SpacesView: View {
                 }
             } else if spaces.viewMode == .world {
                 HSplitView {
-                    MissionControlView(
-                        rooms: spaces.roomSnapshots,
-                        selection: spaces.selectedSpaceID,
-                        onSelect: { spaces.selectedSpaceID = $0 },
-                        onActivate: { spaces.activate($0) },
-                        onObject: { spaces.objectClicked($0) },
-                        onCourse: { model.study.open(courseID: $0) },
-                        onItem: { model.study.itemClicked($0, options: $1) }
-                    )
-                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                    world
+                        .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
 
                     Group {
                         if let space = spaces.space(id: spaces.selectedSpaceID) {

@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "AtlasCompanion", targets: ["AtlasCompanion"]),
         .library(name: "AtlasCompanionUI", targets: ["AtlasCompanionUI"]),
         .library(name: "AtlasStudy", targets: ["AtlasStudy"]),
+        .library(name: "AtlasCreative", targets: ["AtlasCreative"]),
     ],
     targets: [
         // Headless foundation: event bus, action registry, permissions,
@@ -107,16 +108,24 @@ let package = Package(
             dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit"],
             path: "Modules/Study"
         ),
+        // Creative Studio: creative projects (Orbit projects with creative
+        // fields), thumbnails, sessions and file rules. Headless; the room
+        // draws from `CreativeRoomState` (AtlasSpaces).
+        .target(
+            name: "AtlasCreative",
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasOrbit"],
+            path: "Modules/Creative"
+        ),
         // Native SwiftUI shell.
         .executableTarget(
             name: "ATLAS",
             dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasFlow", "AtlasOrbit", "AtlasOrbitUI",
-                           "AtlasCompanion", "AtlasCompanionUI", "AtlasStudy"],
+                           "AtlasCompanion", "AtlasCompanionUI", "AtlasStudy", "AtlasCreative"],
             path: "App"
         ),
         .testTarget(
             name: "AtlasCoreTests",
-            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasOrbit", "AtlasCompanion", "AtlasStudy", "AtlasFlow"],
+            dependencies: ["AtlasCore", "AtlasSpaces", "AtlasSpacesUI", "AtlasOrbit", "AtlasCompanion", "AtlasStudy", "AtlasFlow", "AtlasCreative"],
             // Unit tests and cross-module integration tests share the mocks.
             path: "Tests",
             sources: ["Unit", "Integration"]

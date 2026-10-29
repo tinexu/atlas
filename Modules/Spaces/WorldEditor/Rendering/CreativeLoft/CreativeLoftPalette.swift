@@ -67,6 +67,12 @@ struct CreativeLoftMaterials {
     let sky: UnlitMaterial
     let screenPink: PhysicallyBasedMaterial
     let screenPeach: PhysicallyBasedMaterial
+    /// The mug's steam: faint and translucent.
+    var steam: UnlitMaterial {
+        var material = UnlitMaterial(color: .white)
+        material.blending = .transparent(opacity: .init(floatLiteral: 0.35))
+        return material
+    }
     /// Small solid colours: paint, cards, books, chips.
     let paints: [String: PhysicallyBasedMaterial]
 
@@ -133,8 +139,13 @@ struct CreativeLoftMaterials {
         self.paints = paints
     }
 
+    /// A palette colour, or any other (a paint jar's, the coffee) made on demand.
     func paint(_ hex: String) -> PhysicallyBasedMaterial {
-        paints[hex] ?? cream
+        if let paint = paints[hex] { return paint }
+        var material = PhysicallyBasedMaterial()
+        material.baseColor = .init(tint: NSColor(atlasHex: hex))
+        material.roughness = 0.6
+        return material
     }
 
     /// A vertical gradient (bottom → top), 1×256, for the sky and the screen.

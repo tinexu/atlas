@@ -27,6 +27,8 @@ public struct CompanionHost {
     public var describeAutomation: (String) -> Void = { _ in }
     /// Whether offers wait for a study session's break (the Study Library's setting).
     public var holdsSuggestionsWhileStudying: () -> Bool = { true }
+    /// Whether offers wait for a creative session's end (the Creative Studio's setting).
+    public var holdsSuggestionsWhileCreating: () -> Bool = { true }
 
     public init() {}
 }
@@ -69,12 +71,13 @@ public final class CompanionController: ObservableObject {
     @Published public private(set) var isStudyFocus = false
     /// Offers and suggestions held during study focus, oldest first.
     @Published public private(set) var held: [Suggestion] = []
+    /// A creative session is running: quiet, but no reading pose.
+    @Published public private(set) var isCreativeFocus = false
     private var hold = StudyHold() {
-        didSet {
-            isStudyFocus = hold.isFocus
-            held = hold.held
-        }
+        didSet { held = hold.held }
     }
+    /// Any session that keeps the Companion quiet.
+    private var isQuiet: Bool { isStudyFocus || isCreativeFocus }
 
     public let core: AtlasCore
     public let runner: CommandRunner
@@ -237,6 +240,10 @@ public final class CompanionController: ObservableObject {
             setStudyFocus(active && event.payload["phase"]?.stringValue == "focus")
         case AtlasEvent.Name.studySessionEnded:
             setStudyFocus(false)
+        case AtlasEvent.Name.creativeSessionChanged:
+            setCreativeFocus(!(event.payload["sessionId"]?.stringValue ?? "").isEmpty)
+        case AtlasEvent.Name.creativeSessionEnded:
+            setCreativeFocus(false)
         case _ where event.name.hasPrefix("lockdown."):
             lockdownEndsAt = core.time?.lockdown.session?.endsAt
         case _ where event.name.hasPrefix("focus."):
@@ -267,7 +274,7 @@ public final class CompanionController: ObservableObject {
         else { return }
         let failed = run.state == .failed || run.state == .partiallySucceeded
         // No chatter while studying: only failures interrupt the reading.
-        if isStudyFocus && !failed { return }
+        if isQuiet && !failed { return }
         var bubble = StatusBubble(text: StatusMessages.message(for: run, store: core.store), isFailure: failed, runID: run.id)
         if failed {
             let names = Dictionary(apps.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
@@ -326,7 +333,18 @@ public final class CompanionController: ObservableObject {
     /// Study focus started or ended. Ending it (a break, or the session's
     /// end) brings out what was held, one at a time.
     private func setStudyFocus(_ focus: Bool) {
-        if let next = hold.setFocus(focus) { present(next) }
+        isStudyFocus = focus
+        updateHold()
+    }
+
+    /// A creative session started or ended: quiet until it ends (no breaks).
+    private func setCreativeFocus(_ focus: Bool) {
+        isCreativeFocus = focus
+        updateHold()
+    }
+
+    private func updateHold() {
+        if let next = hold.setFocus(isQuiet) { present(next) }
     }
 
     /// Shows the next held suggestion (the in-room reader's click does this
@@ -340,7 +358,8 @@ public final class CompanionController: ObservableObject {
     }
 
     private func show(_ suggestion: Suggestion, urgent: Bool = false) {
-        if let now = hold.offer(suggestion, urgent: urgent, holding: host.holdsSuggestionsWhileStudying()) { present(now) }
+        let holding = (isStudyFocus && host.holdsSuggestionsWhileStudying()) || (isCreativeFocus && host.holdsSuggestionsWhileCreating())
+        if let now = hold.offer(suggestion, urgent: urgent, holding: holding) { present(now) }
     }
 
     private func present(_ suggestion: Suggestion) {
@@ -363,7 +382,7 @@ public final class CompanionController: ObservableObject {
 
     private func show(_ recommendation: Recommendation) {
         // Recommendations are worked out again later; while studying, skip them.
-        guard !isStudyFocus else { return }
+        guard !isQuiet else { return }
         showBubble(StatusBubble(text: recommendation.title, detail: recommendation.detail, isFailure: recommendation.kind == .repeatedFailure,
                                 fixTitle: recommendation.action.title, recommendation: recommendation), seconds: 45)
     }
@@ -408,7 +427,7 @@ public final class CompanionController: ObservableObject {
     }
 
     private func showNextHeldSoon() {
-        guard !held.isEmpty, !isStudyFocus else { return }
+        guard !held.isEmpty, !isQuiet else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             MainActor.assumeIsolated { self?.showHeld() }
         }

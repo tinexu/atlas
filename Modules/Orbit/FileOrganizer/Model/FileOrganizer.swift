@@ -158,6 +158,11 @@ public final class FileOrganizer: @unchecked Sendable {
             for other in others where other.watches(path) {
                 if await RuleMatcher.matches(other, path: path, system: system, now: now) { competing.append(other) }
             }
+            if rule.isFallback, let handler = competing.first(where: { !$0.isFallback }) {
+                items.append(DryRunItem(path: path, outcome: "Left to “\(handler.name)”", destination: nil, needsReview: false))
+                continue
+            }
+            competing.removeAll(where: \.isFallback)
             let step = RulePlanner.plan(rule.action, path: path, rule: rule, ifExists: rule.ifExists, system: system)
             let allowed = core.fileAccess.isAllowed(path)
             let destinationAllowed = step.destination.map(core.fileAccess.isAllowed) ?? true

@@ -80,6 +80,19 @@ public enum RulePlanner {
                 description: destination == nil ? "Skip: \(target.abbreviatedPath) already has \(name)" : "Move to \(target.abbreviatedPath)",
                 destination: destination
             )
+        case .moveAndRename(let folder, let newName):
+            let target = FileLocation.normalize(folder)
+            let direct = (target as NSString).appendingPathComponent(newName)
+            let taken = system.fileKind(atPath: direct) != .missing
+            let destination: String? = taken ? (ifExists == .skip ? nil : FilePathsPreview.available(newName, in: target, system: system)) : direct
+            return PlannedStep(
+                actionID: MoveFileAction.id,
+                parameters: ["path": .string(path), "destination": .string(target), "name": .string(newName), "createFolder": true,
+                             "ifExists": conflict],
+                description: destination == nil ? "Skip: \(target.abbreviatedPath) already has \(newName)"
+                    : "Move to \(target.abbreviatedPath) as “\(newName)”",
+                destination: destination
+            )
         case .rename(let pattern):
             let folder = (path as NSString).deletingLastPathComponent
             let newName = RenamePattern.newName(pattern, path: path, date: date, match: match) {

@@ -23,6 +23,8 @@ struct SpaceEditor: View {
     @State private var editingObject: SpaceObject?
     @State private var editingLockdown: ActivationProfile?
     @State private var editingCourses = false
+    @State private var editingProjects = false
+    @State private var editingCreativeSettings = false
     @State private var editingStudySettings = false
 
     init(original: Space) {
@@ -124,6 +126,27 @@ struct SpaceEditor: View {
                     }
                 }
 
+                if draft.templateID == CreativeLoft.templateID {
+                    Section {
+                        HStack {
+                            Label("\(model.creative.activeProjects.count) project\(model.creative.activeProjects.count == 1 ? "" : "s")",
+                                  systemImage: "paintpalette")
+                            Spacer()
+                            Button("Projects…") { editingProjects = true }
+                            Button("Creative Settings…") { editingCreativeSettings = true }
+                        }
+                        if let current = model.creative.currentProject {
+                            Text("Current: \(current.name)\(model.creative.settings.pinnedProjectID == current.id ? " (pinned)" : "")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Creative Studio")
+                    } footer: {
+                        Text("The easel shows the current project: the one you pinned, else the one you opened from the room most recently, else the one whose files changed last. Right-click the easel to switch.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Room objects") {
                     let objects = spaces.objects(for: original.id)
                     if objects.isEmpty {
@@ -176,6 +199,12 @@ struct SpaceEditor: View {
         }
         .sheet(isPresented: $editingCourses) {
             CoursesSettingsView().environmentObject(model.study)
+        }
+        .sheet(isPresented: $editingCreativeSettings) {
+            CreativeSettingsView().environmentObject(model.creative)
+        }
+        .sheet(isPresented: $editingProjects) {
+            ProjectsSettingsView().environmentObject(model.creative).environmentObject(model)
         }
         .sheet(isPresented: $editingStudySettings) {
             StudySettingsView().environmentObject(model.study).environmentObject(model)

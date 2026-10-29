@@ -33,6 +33,7 @@ enum CreativeLoftBuilder {
         loft.scale = SIMD3(repeating: scale)
         loft.position = offset
         var parts = CreativeLoftParts()
+        parts.materials = m
 
         let shell = Batches<LoftMaterial>(m)
         buildShell(shell, detail: detail)
@@ -71,16 +72,72 @@ enum CreativeLoftBuilder {
             container.addChild(pink)
             container.addChild(peach)
             parts.screenOverlay = peach
+            // The current project, softly blurred, over the screen colours.
+            let picture = ModelEntity(mesh: .generatePlane(width: 1, height: 1), materials: [UnlitMaterial(color: .white)])
+            picture.name = "monitorPicture"
+            picture.position = [-0.9, 1.05, -0.757]
+            picture.isEnabled = false
+            container.addChild(picture)
+            parts.monitorPicture = picture
         }
-        prop(.easel, { buildEasel($0, detail: detail) })
+        prop(.easel, { buildEasel($0, detail: detail) }) { container in
+            if detail {
+                // The blobs, apart so a real picture can replace them.
+                let blobs = Entity()
+                blobs.name = "easelBlobs"
+                let paint = Batches<LoftMaterial>(m)
+                addEaselBlobs(paint)
+                paint.flush(into: blobs)
+                container.addChild(blobs)
+                parts.easelBlobs = blobs
+            }
+            // The current project's picture, laid on the canvas when there is one.
+            let picture = ModelEntity(mesh: .generatePlane(width: 1, height: 1), materials: [UnlitMaterial(color: .white)])
+            picture.name = "easelPicture"
+            picture.orientation = Easel.tilt
+            picture.position = Easel.canvas + Easel.tilt.act([0, 0, 0.0165])
+            picture.isEnabled = false
+            container.addChild(picture)
+            parts.easelPicture = picture
+        }
         prop(.neon, { buildNeon($0) }) { container in
             container.components.set(OpacityComponent(opacity: 1))
             parts.neon = container
         }
         if detail {
             prop(.shelves, { buildShelves($0) })
-            prop(.pegboard, { buildPegboard($0) })
-            prop(.mug, { buildMug($0) })
+            prop(.pegboard, { buildPegboard($0) }) { container in
+                // Real pictures pinned over the cards (filled by the motion).
+                let content = Entity()
+                content.name = "pegboardContent"
+                container.addChild(content)
+                parts.pegboardContent = content
+            }
+            buildJars(m, into: loft, parts: &parts)
+            buildLiveWindow(m, into: loft, parts: &parts)
+            parts.rugContent = buildRugItem(into: loft)
+            let gallery = Entity()
+            gallery.name = "galleryContent"
+            loft.addChild(gallery)
+            parts.galleryContent = gallery
+            prop(.mug, { buildMug($0) }) { container in
+                // Coffee (it drains and refills) and a wisp of steam while a session runs.
+                let coffee = ModelEntity(mesh: .generateCylinder(height: 0.004, radius: 0.034),
+                                         materials: [m.paint("#6B4430")])
+                coffee.position = Mug.full
+                container.addChild(coffee)
+                parts.mugCoffee = coffee
+                for index in 0..<3 {
+                    let puff = Entity()
+                    puff.position = Mug.top + [Float(index - 1) * 0.012, 0.02 + Float(index) * 0.025, 0]
+                    let mesh = ModelEntity(mesh: .generateSphere(radius: 0.012), materials: [m.steam])
+                    mesh.components.set(OpacityComponent(opacity: 0.35))
+                    puff.addChild(mesh)
+                    puff.isEnabled = false
+                    container.addChild(puff)
+                    parts.steam.append(puff)
+                }
+            }
             prop(.pouf, { buildPouf($0) })
             prop(.pendant, { buildPendant($0) }) { container in
                 let bulb = ModelEntity(mesh: .generateSphere(radius: 1), materials: [m.bulb])
@@ -163,6 +220,7 @@ enum CreativeLoftBuilder {
         if detail { sun.shadow = SpotLightComponent.Shadow() }
         sun.look(at: [-0.3, 0, 0.6], from: [1.0, 3.2, -3.6], relativeTo: loft)
         loft.addChild(sun, preservingWorldTransform: true)
+        parts.sunLight = sun
 
         // Fill: keeps shadows pink, never black.
         let fill = PointLight()
@@ -227,11 +285,12 @@ enum CreativeLoftBuilder {
 
     static func buildWindow(_ b: Batches<LoftMaterial>, detail: Bool) {
         let cx: Float = 0.6, z: Float = -1.5
-        // Sky 10 cm behind the opening.
-        b.add(.sky, .generatePlane(width: 1.6, height: 1.7), at: [cx, 1.45, -1.72])
-        // Glass: rectangle plus a half disc for the arch.
-        b.add(.glass, .generatePlane(width: 1.4, height: 0.8), at: [cx, 1.1, z - 0.03])
-        b.add(.glass, LoftShapes.halfDisc(radius: 0.7, segments: detail ? 24 : 10), at: [cx, 1.5, z - 0.03])
+        if !detail {
+            // The miniature's still golden sky and glass; the full room's are live (`buildLiveWindow`).
+            b.add(.sky, .generatePlane(width: 1.6, height: 1.7), at: [cx, 1.45, -1.72])
+            b.add(.glass, .generatePlane(width: 1.4, height: 0.8), at: [cx, 1.1, z - 0.03])
+            b.add(.glass, LoftShapes.halfDisc(radius: 0.7, segments: 10), at: [cx, 1.5, z - 0.03])
+        }
         // Brass frame, 3 cm: sides, sill, arch, mullions.
         b.add(.brass, box(0.03, 0.8, 0.05), at: [cx - 0.7, 1.1, z])
         b.add(.brass, box(0.03, 0.8, 0.05), at: [cx + 0.7, 1.1, z])
@@ -292,6 +351,13 @@ enum CreativeLoftBuilder {
         b.add(.mauveDark, rbox(0.7, 0.42, 0.03, 0.02), at: [x, 1.05, z])
     }
 
+    enum Mug {
+        static let top = SIMD3<Float>(-0.45, 0.86, -0.45)
+        /// Where the coffee's surface sits when full, and when drunk.
+        static let full = SIMD3<Float>(-0.45, 0.85, -0.45)
+        static let empty = SIMD3<Float>(-0.45, 0.785, -0.45)
+    }
+
     static func buildMug(_ b: Batches<LoftMaterial>) {
         let x: Float = -0.45, z: Float = -0.45
         b.add(.ceramicRose, .generateCylinder(height: 0.09, radius: 0.04), at: [x, 0.815, z])
@@ -308,6 +374,17 @@ enum CreativeLoftBuilder {
 
     // MARK: - Easel
 
+    enum Easel {
+        /// The canvas's centre and tilt; its face is 1.5 cm in front.
+        static let canvas = SIMD3<Float>(1.3, 1.05, -0.11)
+        static let tilt = simd_quatf(angle: -0.1, axis: [1, 0, 0])
+        /// The picture fits inside this, leaving a thin cream border.
+        static let pictureArea = SIMD2<Float>(0.62, 0.82)
+    }
+
+    /// The monitor screen's picture area.
+    static let monitorArea = SIMD2<Float>(0.64, 0.36)
+
     static func buildEasel(_ b: Batches<LoftMaterial>, detail: Bool) {
         let x: Float = 1.3, z: Float = -0.2
         for (dx, tilt) in [(Float(-0.25), Float(-0.14)), (0.25, 0.14)] {
@@ -320,12 +397,7 @@ enum CreativeLoftBuilder {
         let canvasTilt = simd_quatf(angle: -0.1, axis: [1, 0, 0])
         b.add(.cream, rbox(0.7, 0.9, 0.03, 0.012), at: [x, 1.05, z + 0.09], rotation: canvasTilt)
         let palette = CreativeLoftPalette.current
-        for (hex, offset, size) in [(palette.peach, SIMD2<Float>(-0.12, 0.12), SIMD2<Float>(0.16, 0.12)),
-                                    (palette.rose, [0.1, -0.05], [0.13, 0.16]),
-                                    (palette.sage, [-0.05, -0.22], [0.1, 0.07])] {
-            b.add(.paint(hex), LoftShapes.unitSphere, at: [x + offset.x, 1.05 + offset.y, z + 0.11 + offset.y * 0.1],
-                  rotation: canvasTilt, scale: [size.x, size.y, 0.008])
-        }
+        if !detail { addEaselBlobs(b) }
         guard detail else { return }
         // Side table with a palette and a jar of brushes.
         let tx: Float = 1.8, tz: Float = 0.25
@@ -341,6 +413,20 @@ enum CreativeLoftBuilder {
         for index in 0..<3 {
             b.add(.wood, .generateCylinder(height: 0.2, radius: 0.004), at: [tx + 0.1 + Float(index - 1) * 0.012, 0.7, tz - 0.05],
                   rotation: simd_quatf(angle: Float(index - 1) * 0.15, axis: [0, 0, 1]))
+        }
+    }
+
+    /// The soft abstract paint on the canvas, shown when the current
+    /// project has no picture yet.
+    static func addEaselBlobs(_ b: Batches<LoftMaterial>) {
+        let x: Float = 1.3, z: Float = -0.2
+        let canvasTilt = simd_quatf(angle: -0.1, axis: [1, 0, 0])
+        let palette = CreativeLoftPalette.current
+        for (hex, offset, size) in [(palette.peach, SIMD2<Float>(-0.12, 0.12), SIMD2<Float>(0.16, 0.12)),
+                                    (palette.rose, [0.1, -0.05], [0.13, 0.16]),
+                                    (palette.sage, [-0.05, -0.22], [0.1, 0.07])] {
+            b.add(.paint(hex), LoftShapes.unitSphere, at: [x + offset.x, 1.05 + offset.y, z + 0.11 + offset.y * 0.1],
+                  rotation: canvasTilt, scale: [size.x, size.y, 0.008])
         }
     }
 
@@ -363,12 +449,7 @@ enum CreativeLoftBuilder {
 
     static func buildShelfDecor(_ b: Batches<LoftMaterial>) {
         let palette = CreativeLoftPalette.current
-        // Paint jars with cream lids.
-        for (index, hex) in [palette.rose, palette.peach, palette.sage, palette.berry, palette.mauve].enumerated() {
-            let z = -0.3 + Float(index) * 0.1
-            b.add(.paint(hex), .generateCylinder(height: 0.08, radius: 0.035), at: [-1.86, 1.355, z])
-            b.add(.cream, .generateCylinder(height: 0.015, radius: 0.037), at: [-1.86, 1.402, z])
-        }
+        // (The paint jars are their own clickable items: `buildJars`.)
         // Books standing on the top shelf.
         for (index, hex) in [palette.cream, palette.rose, palette.sage].enumerated() {
             b.add(.paint(hex), rbox(0.15, 0.2, 0.03, 0.005), at: [-1.88, 1.815, 0.42 + Float(index) * 0.035])
@@ -457,8 +538,32 @@ struct CreativeLoftParts {
     var bulbs: [Entity] = []
     var motes: [Entity] = []
     var screenOverlay: Entity?
+    /// The current project's picture on the easel and (blurred) on the monitor.
+    var easelPicture: ModelEntity?
+    var easelBlobs: Entity?
+    var monitorPicture: ModelEntity?
     var neon: Entity?
     var neonLight: PointLight?
+    /// The mug's coffee and steam (shown while a session runs).
+    var mugCoffee: ModelEntity?
+    /// The paint jars' bodies (recoloured), the pegboard's pictures and the gallery.
+    var jarBodies: [ModelEntity] = []
+    var pegboardContent: Entity?
+    var galleryContent: Entity?
+    var materials: CreativeLoftMaterials?
+    /// The live window (full room), the sun through it and the rug's splashes.
+    var sky: ModelEntity?
+    var moon: ModelEntity?
+    var clouds: ModelEntity?
+    var fog: ModelEntity?
+    var rain: [Entity] = []
+    var snow: [Entity] = []
+    var sunLight: SpotLight?
+    var rugContent: Entity?
+    /// Where clouds, rain, snow and the painter are added when first needed.
+    weak var room: Entity?
+    var painter: CreativeLoftBuilder.PainterParts?
+    var steam: [Entity] = []
     var pendantLight: PointLight?
 }
 

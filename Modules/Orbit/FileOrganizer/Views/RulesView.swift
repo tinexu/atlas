@@ -209,6 +209,8 @@ struct RuleEditor: View {
                         ForEach(FileRule.Mode.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     .disabled(rule.action == .trash)
+                    Toggle("Only when no other rule matches", isOn: $rule.isFallback)
+                        .help("A catch-all, e.g. “other PDFs”: it steps aside for any rule that handles the file, so nothing is asked about twice.")
                     if rule.action == .trash {
                         Text("Moving to the Trash always waits for your approval in the review queue.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -296,7 +298,7 @@ struct RuleEditor: View {
                       prompt: Text("{date:yyyy-MM-dd} {name}"))
         case .tag(let tags):
             TextField("Tags", text: Binding(get: { tags }, set: { rule.action = .tag($0) }), prompt: Text("Work, Red"))
-        case .trash:
+        case .trash, .moveAndRename:
             EmptyView()
         }
     }
@@ -305,7 +307,7 @@ struct RuleEditor: View {
         case move, rename, tag, trash
         init(_ action: RuleAction) {
             switch action {
-            case .moveTo: self = .move
+            case .moveTo, .moveAndRename: self = .move
             case .rename: self = .rename
             case .tag: self = .tag
             case .trash: self = .trash

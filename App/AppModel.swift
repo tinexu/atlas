@@ -87,6 +87,7 @@ final class AppModel: ObservableObject {
     let lockdown: LockdownModel
     /// The Study Library: courses and what its room shows.
     let study: StudyModel
+    let creative: CreativeModel
     /// A run to select when Run History appears (the Companion's "Details").
     @Published var focusedRunID: UUID?
     /// Stage 07 Time Architect and Today. Nil if scheduling couldn't start.
@@ -140,6 +141,17 @@ final class AppModel: ObservableObject {
     /// atlas:// links from notifications. "atlas://study/board": the Study
     /// Library, with the chalkboard's assignments panel open.
     func open(link: String) {
+        if let (verb, path) = FileLinks.parse(link), let core {
+            // A file notification's Open or Show.
+            let action: ActionID = verb == "show" ? RevealInFinderAction.id : OpenFileAction.id
+            Task { _ = await core.engine.invoke(action, parameters: ["path": .string(path)], source: "notification") }
+            return
+        }
+        if link == "atlas://creative/stats" {
+            bringForward()
+            creative.showStats()
+            return
+        }
         guard link == "atlas://study/board" else { return }
         section = .spaces
         if let id = study.studySpaceID { spaces.selectedSpaceID = id }
@@ -158,6 +170,7 @@ final class AppModel: ObservableObject {
             companion = nil
             lockdown = LockdownModel(core: nil)
             study = StudyModel(core: nil)
+            creative = CreativeModel(core: nil)
             timeArchitect = nil
             startupError = error.localizedDescription
             if case DataSafetyError.corrupted = error, let url = try? AtlasStore.defaultURL() {
@@ -178,6 +191,7 @@ final class AppModel: ObservableObject {
         companion = core.map(CompanionController.init)
         lockdown = LockdownModel(core: core)
         study = StudyModel(core: core)
+        creative = CreativeModel(core: core)
         timeArchitect = core.flatMap { core in core.time.map { TimeArchitectModel(core: core, time: $0) } }
         focusSession = core?.time?.focus.session
         spaces.onError = { [weak self] message in self?.errorMessage = message }
@@ -188,6 +202,22 @@ final class AppModel: ObservableObject {
         study.spaces = spaces
         spaces.studyState = { [weak study] in study?.roomState }
         spaces.studyObjectClicked = { [weak study] object in study?.objectClicked(object) ?? false }
+        creative.spaces = spaces
+        creative.addFolderToOrbit = { [weak self] path in self?.addFolderToOrbit(path) ?? false }
+        spaces.creativeState = { [weak creative] in creative?.roomState }
+        spaces.creativeObjectClicked = { [weak creative] object in creative?.objectClicked(object) ?? false }
+        spaces.creativeObjectOptions = { [weak creative] object in creative?.objectOptions(object) }
+        // The window shares the Study Library's weather city.
+        creative.windowInfo = { [weak study] in study?.module?.window() }
+        creative.weatherCity = { [weak study] in study?.settings.weatherCity ?? "" }
+        creative.setWeatherCity = { [weak study] city in
+            guard let study else { return }
+            var settings = study.settings
+            settings.weatherCity = city.trimmingCharacters(in: .whitespaces)
+            study.settings = settings
+            study.refreshWeather(force: true)
+        }
+        creative.onWindowClicked = { [weak creative] in creative?.showCard(CreativeWindowCard()) }
         folderObserver = NotificationCenter.default.addObserver(forName: .atlasAddFolderToOrbit, object: nil, queue: .main) { [weak self] note in
             guard let path = note.object as? String else { return }
             MainActor.assumeIsolated { _ = self?.addFolderToOrbit(path) }
@@ -279,6 +309,7 @@ final class AppModel: ObservableObject {
         host.isPaused = { [weak self] in self?.isPaused ?? false }
         host.describeAutomation = { [weak self] prompt in self?.describeAutomation(prompt) }
         host.holdsSuggestionsWhileStudying = { [weak self] in self?.study.settings.holdSuggestions ?? true }
+        host.holdsSuggestionsWhileCreating = { [weak self] in self?.creative.settings.quietDuringSessions ?? true }
         companion.host = host
         companion.start()
         connectReader(companion)
@@ -303,12 +334,30 @@ final class AppModel: ObservableObject {
                                          isFocused: companion.isStudyFocus, waiting: waiting, detail: detail)
         }
         study.onReaderClicked = { [weak companion] in companion?.showHeld(sayIfNone: true) }
+        creative.painterInfo = { [weak self, weak companion] in
+            guard let self, let companion, self.creative.settings.companionPaints else { return nil }
+            let settings = companion.settings
+            let style: CreativeRoomState.Painter.Style = settings.character == .creature ? .creature : settings.character == .orb ? .orb : .robot
+            let waiting = companion.held.count
+            let detail = companion.isCreativeFocus
+                ? (waiting > 0 ? "Painting quietly · \(waiting) thing\(waiting == 1 ? "" : "s") waiting for the end of your session" : "Painting quietly while you create")
+                : (waiting > 0 ? "\(waiting) suggestion\(waiting == 1 ? "" : "s") waiting · click to see" : "Painting · click for anything waiting")
+            return CreativeRoomState.Painter(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
+                                             isFocused: companion.isCreativeFocus, bounces: self.creative.service?.exportsSaved ?? 0,
+                                             waiting: waiting, detail: detail)
+        }
+        creative.onPainterClicked = { [weak companion] in companion?.showHeld(sayIfNone: true) }
         readerWatch = companion.$held.map(\.count).removeDuplicates().combineLatest(
-            companion.$isStudyFocus.removeDuplicates(),
+            companion.$isStudyFocus.combineLatest(companion.$isCreativeFocus).map { $0 || $1 }.removeDuplicates(),
             companion.$settings.map { "\($0.character.rawValue)|\($0.primaryColor)|\($0.secondaryColor)" }.removeDuplicates()
         )
         .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
-        .sink { [weak self] _ in MainActor.assumeIsolated { self?.study.refreshRoom() } }
+        .sink { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.study.refreshRoom()
+                self?.creative.refreshRoom()
+            }
+        }
     }
 
     /// Shows the main window, opening it again if it was closed.
@@ -764,14 +813,25 @@ final class ConfirmationNotifications: NSObject, UNUserNotificationCenterDelegat
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.setNotificationCategories([UNNotificationCategory(
-            identifier: Self.category,
-            actions: [
-                UNNotificationAction(identifier: "allow", title: "Allow", options: []),
-                UNNotificationAction(identifier: "deny", title: "Don't Allow", options: [.destructive]),
-            ],
-            intentIdentifiers: []
-        )])
+        center.setNotificationCategories([
+            UNNotificationCategory(
+                identifier: Self.category,
+                actions: [
+                    UNNotificationAction(identifier: "allow", title: "Allow", options: []),
+                    UNNotificationAction(identifier: "deny", title: "Don't Allow", options: [.destructive]),
+                ],
+                intentIdentifiers: []
+            ),
+            // "Render done: robot-0042.png" with Open and Show.
+            UNNotificationCategory(
+                identifier: FileLinks.category,
+                actions: [
+                    UNNotificationAction(identifier: "open", title: "Open", options: [.foreground]),
+                    UNNotificationAction(identifier: "show", title: "Show", options: [.foreground]),
+                ],
+                intentIdentifiers: []
+            ),
+        ])
     }
 
     func ask(_ request: ConfirmationRequest) async -> Bool {
@@ -803,7 +863,8 @@ final class ConfirmationNotifications: NSObject, UNUserNotificationCenterDelegat
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        if let link = response.notification.request.content.userInfo["atlasLink"] as? String {
+        let info = response.notification.request.content.userInfo
+        if let link = info["atlasLink.\(response.actionIdentifier)"] as? String ?? info["atlasLink"] as? String {
             await MainActor.run { NotificationCenter.default.post(name: .atlasOpenLink, object: link) }
             return
         }

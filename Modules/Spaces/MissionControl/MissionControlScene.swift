@@ -107,6 +107,9 @@ final class MissionControlScene {
             if let study = snapshot.study, let motion = entity.components[RoomMotionComponent.self]?.motion as? StudyLibraryMotion {
                 motion.update(study)
             }
+            if let creative = snapshot.creative, let motion = entity.components[RoomMotionComponent.self]?.motion as? CreativeLoftMotion {
+                motion.update(creative)
+            }
             if snapshot.isActive != activeRooms.contains(snapshot.id) {
                 // Only a change animates, not a room that was already active.
                 entity.components[RoomMotionComponent.self]?.motion.setActive(snapshot.isActive, animated: hasFramedWorld)
@@ -197,6 +200,8 @@ final class MissionControlScene {
         case course(UUID, room: UUID)
         /// A Study Library item that isn't a Space object (the hourglass, the candle).
         case item(StudyRoomState.Item, room: UUID)
+        /// A Creative Studio item that isn't a Space object (a paint jar, a gallery frame).
+        case creative(CreativeRoomState.Item, room: UUID)
     }
 
     /// Resolves a clicked entity (possibly a deep child) to a room or object.
@@ -205,7 +210,11 @@ final class MissionControlScene {
         var objectID: UUID?
         var courseID: UUID?
         var item: StudyRoomState.Item?
+        var creative: CreativeRoomState.Item?
         while let node = current {
+            if objectID == nil, courseID == nil, item == nil, creative == nil, node.name.hasPrefix("creativeitem:") {
+                creative = CreativeRoomState.Item(entityName: node.name)
+            }
             if objectID == nil, courseID == nil, item == nil, node.name.hasPrefix("studyitem:") {
                 item = StudyRoomState.Item(entityName: node.name)
             }
@@ -219,6 +228,7 @@ final class MissionControlScene {
                 if let objectID { return .object(objectID, room: roomID) }
                 if let courseID { return .course(courseID, room: roomID) }
                 if let item { return .item(item, room: roomID) }
+                if let creative { return .creative(creative, room: roomID) }
                 return .room(roomID)
             }
             current = node.parent
@@ -250,7 +260,7 @@ final class MissionControlScene {
             if let entity = scene.raycast(origin: origin, direction: direction, length: 200, query: .nearest).first?.entity,
                let found = hit(for: entity) {
                 switch found {
-                case .object, .course, .item:
+                case .object, .course, .item, .creative:
                     target = objectContainer(entity)
                     result = found
                 case .room:
@@ -272,7 +282,8 @@ final class MissionControlScene {
     private func objectContainer(_ entity: Entity) -> Entity? {
         var current: Entity? = entity
         while let node = current {
-            if node.name.hasPrefix("object:") || node.name.hasPrefix("course:") || node.name.hasPrefix("studyitem:") { return node }
+            if node.name.hasPrefix("object:") || node.name.hasPrefix("course:") || node.name.hasPrefix("studyitem:")
+                || node.name.hasPrefix("creativeitem:") { return node }
             current = node.parent
         }
         return nil

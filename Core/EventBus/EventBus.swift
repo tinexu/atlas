@@ -111,4 +111,10 @@ extension AtlasEvent.Name {
     public static let studySessionChanged = "study.session.changed"
     /// Payload: sessionId, headline, early.
     public static let studySessionEnded = "study.session.ended"
+    /// A creative session started, paused or resumed. Payload: sessionId
+    /// (empty when none), kind ("create" or "watch"). The Companion stays
+    /// quiet until it ends.
+    public static let creativeSessionChanged = "creative.session.changed"
+    /// Payload: sessionId, headline, early.
+    public static let creativeSessionEnded = "creative.session.ended"
 }

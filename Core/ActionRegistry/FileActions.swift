@@ -52,6 +52,16 @@ enum FilePaths {
         OutputSpec(key: "skipped", label: "Skipped (name taken)", type: .bool),
     ]
 
+    /// Moves and copies can give the item a new name in its new folder.
+    static let newNameSpec = ParameterSpec(key: "name", label: "New name", kind: .text, isRequired: false,
+                                           help: "Leave empty to keep the name")
+
+    /// The `name` parameter, cleaned; nil keeps the original name.
+    static func newName(_ parameters: ActionParameters) -> String? {
+        guard let name = parameters["name"]?.stringValue?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return nil }
+        return name.replacingOccurrences(of: "/", with: "-")
+    }
+
     static let ifExistsSpec = ParameterSpec(
         key: "ifExists", label: "If the name is taken", kind: .text, isRequired: false, defaultValue: "addNumber",
         options: ConflictMode.allCases.map(\.rawValue)
@@ -102,6 +112,7 @@ public struct MoveFileAction: AtlasAction {
             ParameterSpec(key: "destination", label: "To folder", kind: .folderPath),
             ParameterSpec(key: "createFolder", label: "Create the folder if needed", kind: .boolean,
                           isRequired: false, defaultValue: true),
+            FilePaths.newNameSpec,
             FilePaths.ifExistsSpec,
         ],
         permissions: [.fileAccess],
@@ -132,8 +143,8 @@ public struct MoveFileAction: AtlasAction {
         case .directory:
             break
         }
-        let name = (path as NSString).lastPathComponent
-        if (path as NSString).deletingLastPathComponent == FileLocation.normalize(folder) {
+        let name = FilePaths.newName(parameters) ?? (path as NSString).lastPathComponent
+        if (path as NSString).deletingLastPathComponent == FileLocation.normalize(folder), name == (path as NSString).lastPathComponent {
             return ActionOutput("\(name) is already in \((folder as NSString).lastPathComponent)", values: FilePaths.outputs(path))
         }
         guard let destination = FilePaths.destination(name, in: folder, mode: FilePaths.conflictMode(parameters), system: context.system) else {
@@ -164,6 +175,7 @@ public struct CopyFileAction: AtlasAction {
             ParameterSpec(key: "destination", label: "To folder", kind: .folderPath),
             ParameterSpec(key: "createFolder", label: "Create the folder if needed", kind: .boolean,
                           isRequired: false, defaultValue: true),
+            FilePaths.newNameSpec,
             FilePaths.ifExistsSpec,
         ],
         permissions: [.fileAccess],
@@ -189,7 +201,7 @@ public struct CopyFileAction: AtlasAction {
             try await context.system.createFolder(atPath: folder)
             context.log(.createFolder, folder)
         }
-        let name = (path as NSString).lastPathComponent
+        let name = FilePaths.newName(parameters) ?? (path as NSString).lastPathComponent
         guard let destination = FilePaths.destination(name, in: folder, mode: FilePaths.conflictMode(parameters), system: context.system) else {
             return ActionOutput("Skipped \(name): \((folder as NSString).lastPathComponent) already has a file with that name",
                                 values: FilePaths.outputs(path, skipped: true))

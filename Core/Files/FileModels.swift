@@ -202,9 +202,12 @@ public struct Project: Identifiable, Hashable, Sendable {
     public var spaceBehavior: SpaceBehavior
     public var createdAt: Date
     public var links: [ProjectLink]
+    /// Set for a Creative Studio project; nil for a plain Orbit project.
+    public var creative: CreativeInfo?
 
     public init(id: UUID = UUID(), name: String, color: String = "blue", spaceID: UUID? = nil,
-                spaceBehavior: SpaceBehavior = .none, createdAt: Date = Date(), links: [ProjectLink] = []) {
+                spaceBehavior: SpaceBehavior = .none, createdAt: Date = Date(), links: [ProjectLink] = [],
+                creative: CreativeInfo? = nil) {
         self.id = id
         self.name = name
         self.color = color
@@ -212,6 +215,123 @@ public struct Project: Identifiable, Hashable, Sendable {
         self.spaceBehavior = spaceBehavior
         self.createdAt = createdAt
         self.links = links
+        self.creative = creative
+    }
+}
+
+/// What a Creative Studio project adds to an Orbit project: what kind of
+/// work it is, the apps and main files it opens, its links, folders and
+/// status. Kept together (v10 `project.creative_json`), so plain projects
+/// are untouched.
+public struct CreativeInfo: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case design, threeD = "3d", illustration, video, photo, other
+
+        public var title: String {
+            switch self {
+            case .design: return "Design"
+            case .threeD: return "3D"
+            case .illustration: return "Illustration"
+            case .video: return "Video"
+            case .photo: return "Photo"
+            case .other: return "Other"
+            }
+        }
+    }
+
+    public enum Status: String, Codable, CaseIterable, Sendable {
+        case idea, inProgress = "in_progress", done
+
+        public var title: String {
+            switch self {
+            case .idea: return "Idea"
+            case .inProgress: return "In progress"
+            case .done: return "Done"
+            }
+        }
+    }
+
+    /// A web link: a Figma file, a Pinterest board, a brief, a tutorial…
+    public struct Link: Codable, Hashable, Sendable, Identifiable {
+        public enum Kind: String, Codable, CaseIterable, Sendable {
+            case figma, pinterest, dribbble, brief, tutorial, other
+
+            public var title: String {
+                switch self {
+                case .figma: return "Figma"
+                case .pinterest: return "Pinterest"
+                case .dribbble: return "Dribbble"
+                case .brief: return "Brief"
+                case .tutorial: return "Tutorial"
+                case .other: return "Link"
+                }
+            }
+        }
+
+        public var id: UUID
+        public var kind: Kind
+        public var title: String
+        public var url: String
+
+        public init(id: UUID = UUID(), kind: Kind = .other, title: String = "", url: String) {
+            self.id = id
+            self.kind = kind
+            self.title = title
+            self.url = url
+        }
+    }
+
+    public var kind: Kind
+    /// Bundle IDs, the main one first.
+    public var apps: [String]
+    /// The main file(s): what clicking the easel opens.
+    public var mainFiles: [String]
+    public var links: [Link]
+    /// The project's folder (inside an Orbit folder) and its bookmark.
+    public var folder: String?
+    public var folderBookmark: Data?
+    /// Where exports go; nil means `<folder>/Exports`.
+    public var exportsFolder: String?
+    public var status: Status
+    /// A picture to show for the project (else its latest export or file).
+    public var coverImage: String?
+    public var finishedAt: Date?
+    public var isArchived: Bool
+
+    public init(kind: Kind = .other, apps: [String] = [], mainFiles: [String] = [], links: [Link] = [], folder: String? = nil,
+                folderBookmark: Data? = nil, exportsFolder: String? = nil, status: Status = .inProgress, coverImage: String? = nil,
+                finishedAt: Date? = nil, isArchived: Bool = false) {
+        self.kind = kind
+        self.apps = apps
+        self.mainFiles = mainFiles
+        self.links = links
+        self.folder = folder
+        self.folderBookmark = folderBookmark
+        self.exportsFolder = exportsFolder
+        self.status = status
+        self.coverImage = coverImage
+        self.finishedAt = finishedAt
+        self.isArchived = isArchived
+    }
+
+    /// The exports folder, defaulting to `<folder>/Exports`.
+    public var resolvedExportsFolder: String? {
+        exportsFolder ?? folder.map { ($0 as NSString).appendingPathComponent("Exports") }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .other
+        apps = try c.decodeIfPresent([String].self, forKey: .apps) ?? []
+        mainFiles = try c.decodeIfPresent([String].self, forKey: .mainFiles) ?? []
+        links = try c.decodeIfPresent([Link].self, forKey: .links) ?? []
+        folder = try c.decodeIfPresent(String.self, forKey: .folder)
+        folderBookmark = try c.decodeIfPresent(Data.self, forKey: .folderBookmark)
+        exportsFolder = try c.decodeIfPresent(String.self, forKey: .exportsFolder)
+        status = try c.decodeIfPresent(Status.self, forKey: .status) ?? .inProgress
+        coverImage = try c.decodeIfPresent(String.self, forKey: .coverImage)
+        finishedAt = try c.decodeIfPresent(Date.self, forKey: .finishedAt)
+        isArchived = try c.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
     }
 }
 

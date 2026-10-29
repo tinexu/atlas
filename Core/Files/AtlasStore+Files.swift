@@ -304,12 +304,13 @@ extension AtlasStore {
         try database.transaction {
             try database.run(
                 """
-                INSERT INTO project (id, name, color, space_id, space_behavior, created_at) VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO project (id, name, color, space_id, space_behavior, created_at, creative_json) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET name = excluded.name, color = excluded.color,
-                    space_id = excluded.space_id, space_behavior = excluded.space_behavior;
+                    space_id = excluded.space_id, space_behavior = excluded.space_behavior, creative_json = excluded.creative_json;
                 """,
                 [.from(project.id), .text(project.name), .text(project.color), .from(project.spaceID?.uuidString),
-                 .text(project.spaceBehavior.rawValue), .from(project.createdAt)]
+                 .text(project.spaceBehavior.rawValue), .from(project.createdAt),
+                 .from(try project.creative.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) })]
             )
             try database.run("DELETE FROM project_link WHERE project_id = ?;", [.from(project.id)])
             for (position, link) in project.links.enumerated() {
@@ -336,7 +337,8 @@ extension AtlasStore {
             return Project(
                 id: id, name: name, color: row.string("color") ?? "blue", spaceID: row.uuid("space_id"),
                 spaceBehavior: row.string("space_behavior").flatMap(Project.SpaceBehavior.init(rawValue:)) ?? .none,
-                createdAt: row.date("created_at") ?? Date(), links: links[id] ?? []
+                createdAt: row.date("created_at") ?? Date(), links: links[id] ?? [],
+                creative: row.string("creative_json").flatMap { try? JSONDecoder().decode(CreativeInfo.self, from: Data($0.utf8)) }
             )
         }
     }
@@ -392,7 +394,8 @@ extension AtlasStore {
             [
                 .from(rule.id), .from(position), .text(rule.name), .from(rule.isEnabled), .text(rule.mode.rawValue),
                 .text(try FileJSON.encode(rule.folders)),
-                .text(try FileJSON.encode(StoredConditions(match: rule.match, items: rule.conditions, ifExists: rule.ifExists))),
+                .text(try FileJSON.encode(StoredConditions(match: rule.match, items: rule.conditions, ifExists: rule.ifExists,
+                                                           fallback: rule.isFallback ? true : nil))),
                 .text(try FileJSON.encode(rule.action)), .from(rule.workflowID?.uuidString), .from(rule.starterID),
                 .from(rule.createdAt), .from(rule.updatedAt),
             ]
@@ -415,6 +418,7 @@ extension AtlasStore {
         var match: ConditionGroup.Match
         var items: [RuleCondition]
         var ifExists: ConflictMode?
+        var fallback: Bool?
     }
 
     private func rule(from row: SQLRow) -> FileRule? {
@@ -427,7 +431,7 @@ extension AtlasStore {
             mode: row.string("mode").flatMap(FileRule.Mode.init(rawValue:)) ?? .automatic,
             folders: FileJSON.decode([String].self, row.string("folders_json")) ?? [],
             match: conditions?.match ?? .all, conditions: conditions?.items ?? [], action: action,
-            ifExists: conditions?.ifExists ?? .addNumber, workflowID: row.uuid("workflow_id"),
+            ifExists: conditions?.ifExists ?? .addNumber, isFallback: conditions?.fallback ?? false, workflowID: row.uuid("workflow_id"),
             starterID: row.string("starter_id"), createdAt: row.date("created_at") ?? Date(),
             updatedAt: row.date("updated_at") ?? Date()
         )

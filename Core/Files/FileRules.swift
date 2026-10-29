@@ -80,6 +80,9 @@ public enum RuleCondition: Codable, Hashable, Sendable {
 public enum RuleAction: Codable, Hashable, Sendable {
     /// The folder may use {parentFolder}, {match} and {date:yyyy-MM}.
     case moveTo(folder: String)
+    /// Moves it into `folder` under a new name (already worked out, e.g.
+    /// "robot-2026-10-29-3.png"). The Creative Studio's exports use this.
+    case moveAndRename(folder: String, name: String)
     /// e.g. "{date:yyyy-MM-dd} {name}.{ext}"
     case rename(pattern: String)
     /// Comma-separated Finder tags, added to any it has.
@@ -89,6 +92,7 @@ public enum RuleAction: Codable, Hashable, Sendable {
     public var title: String {
         switch self {
         case .moveTo: return "Move to folder"
+        case .moveAndRename: return "Move and rename"
         case .rename: return "Rename"
         case .tag: return "Add Finder tags"
         case .trash: return "Move to Trash"
@@ -98,6 +102,7 @@ public enum RuleAction: Codable, Hashable, Sendable {
     public var summary: String {
         switch self {
         case .moveTo(let folder): return "move to \(folder.abbreviatedPath)"
+        case .moveAndRename(let folder, let name): return "move to \(folder.abbreviatedPath) as “\(name)”"
         case .rename(let pattern): return "rename to “\(pattern)”"
         case .tag(let tags): return "tag \(tags)"
         case .trash: return "move to the Trash"
@@ -123,6 +128,9 @@ public struct FileRule: Identifiable, Hashable, Sendable {
     public var conditions: [RuleCondition]
     public var action: RuleAction
     public var ifExists: ConflictMode
+    /// Only acts when no other rule matches the file (a catch-all, e.g.
+    /// "other PDFs"), and never competes with the rules that do.
+    public var isFallback: Bool
     /// The generated workflow.
     public var workflowID: UUID?
     /// Set on the built-in starter rules.
@@ -132,7 +140,7 @@ public struct FileRule: Identifiable, Hashable, Sendable {
 
     public init(id: UUID = UUID(), name: String, isEnabled: Bool = false, mode: Mode = .automatic, folders: [String],
                 match: ConditionGroup.Match = .all, conditions: [RuleCondition], action: RuleAction,
-                ifExists: ConflictMode = .addNumber, workflowID: UUID? = nil, starterID: String? = nil,
+                ifExists: ConflictMode = .addNumber, isFallback: Bool = false, workflowID: UUID? = nil, starterID: String? = nil,
                 createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.name = name
@@ -143,6 +151,7 @@ public struct FileRule: Identifiable, Hashable, Sendable {
         self.conditions = conditions
         self.action = action
         self.ifExists = ifExists
+        self.isFallback = isFallback
         self.workflowID = workflowID
         self.starterID = starterID
         self.createdAt = createdAt
@@ -152,7 +161,7 @@ public struct FileRule: Identifiable, Hashable, Sendable {
     public var summary: String {
         let joiner = match == .all ? " and " : " or "
         let when = conditions.isEmpty ? "any file" : conditions.map(\.summary).joined(separator: joiner)
-        return "When \(when), \(action.summary)\(mode == .askFirst ? " (after you approve)" : "")"
+        return "When \(when)\(isFallback ? " and no other rule matches" : ""), \(action.summary)\(mode == .askFirst ? " (after you approve)" : "")"
     }
 
     public var dependsOnTime: Bool { conditions.contains { $0.dependsOnTime } }

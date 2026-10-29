@@ -65,6 +65,12 @@ final class SpacesModel: ObservableObject {
     var studyState: (() -> StudyRoomState?)?
     /// Handles a Study Library object click; returns whether it did.
     var studyObjectClicked: ((SpaceObject) -> Bool)?
+    /// What the Creative Studio room shows (the current project).
+    var creativeState: (() -> CreativeRoomState?)?
+    /// Handles a Creative Studio object click; returns whether it did.
+    var creativeObjectClicked: ((SpaceObject) -> Bool)?
+    /// A Creative Studio object's right-click / long-press (the easel's switcher).
+    var creativeObjectOptions: ((SpaceObject) -> Void)?
     private var eventTask: Task<Void, Never>?
     private var workspaceObservers: [NSObjectProtocol] = []
 
@@ -185,7 +191,8 @@ final class SpacesModel: ObservableObject {
                 objects: objects(for: space.id),
                 status: status(for: space.id),
                 isActive: activeSpaceID == space.id,
-                study: space.templateID == StudyLibrary.templateID ? studyState?() : nil
+                study: space.templateID == StudyLibrary.templateID ? studyState?() : nil,
+                creative: space.templateID == CreativeLoft.templateID ? creativeState?() : nil
             )
         }
     }
@@ -286,11 +293,17 @@ final class SpacesModel: ObservableObject {
         }
     }
 
+    /// Right-click or long-press on an object in the 3D room.
+    func objectOptions(_ object: SpaceObject) {
+        if space(id: object.spaceID)?.templateID == CreativeLoft.templateID { creativeObjectOptions?(object) }
+    }
+
     /// A click on an object in the 3D room: run it if it does something,
     /// otherwise offer to assign something.
     func objectClicked(_ object: SpaceObject) {
         // The Study Library's chalkboard and desk calendar have their own clicks.
         if space(id: object.spaceID)?.templateID == StudyLibrary.templateID, studyObjectClicked?(object) == true { return }
+        if space(id: object.spaceID)?.templateID == CreativeLoft.templateID, creativeObjectClicked?(object) == true { return }
         if object.hasAssignment {
             run(object)
         } else {
