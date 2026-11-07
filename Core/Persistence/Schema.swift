@@ -554,6 +554,30 @@ enum Schema {
         );
         CREATE INDEX idx_creative_session_start ON creative_session(started_at);
         """,
+        // v11 — Session tasks: what you want to get done in a focus
+        // session, checked off as you go. `session_id` is NULL while a task
+        // waits for the next session (planned ahead or carried over).
+        """
+        CREATE TABLE session_task (
+            id             TEXT PRIMARY KEY,
+            title          TEXT NOT NULL,
+            done           INTEGER NOT NULL DEFAULT 0,
+            completed_at   REAL,
+            estimated      INTEGER,
+            actual         INTEGER NOT NULL DEFAULT 0,
+            sort_order     INTEGER NOT NULL DEFAULT 0,
+            link_json      TEXT,
+            assignment_id  TEXT,
+            space          TEXT NOT NULL,
+            created_at     REAL NOT NULL,
+            session_id     TEXT,
+            carried_over   INTEGER NOT NULL DEFAULT 0,
+            pinned         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_session_task_session ON session_task(session_id);
+        CREATE INDEX idx_session_task_space ON session_task(space, done);
+        CREATE INDEX idx_session_task_completed ON session_task(completed_at);
+        """,
     ]
 
     static var currentVersion: Int { migrations.count }

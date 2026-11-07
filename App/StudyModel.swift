@@ -33,6 +33,8 @@ final class StudyModel: ObservableObject {
     @Published var setup: SetupRequest?
     /// The end-of-session card's contents.
     @Published private(set) var summary: StudySummary?
+    /// The session's task list, window and quick add.
+    let tasksUI: StudyTasksModel
 
     private var subscription: EventBus.Subscription?
     private var panel: NSPanel?
@@ -53,7 +55,14 @@ final class StudyModel: ObservableObject {
     init(core: AtlasCore?) {
         self.core = core
         module = core.flatMap { try? StudyModule(core: $0) }
+        tasksUI = StudyTasksModel(core: core)
+        tasksUI.study = self
         reload()
+        tasksUI.reload()
+        // A task from an assignment strikes it on the chalkboard, then checks it off.
+        module?.tasks.completeAssignment = { [weak self] id, sync in
+            Task { @MainActor in self?.checkOff(id, syncReminders: sync) }
+        }
         subscription = core?.events.subscribe { [weak self] event in
             guard event.name == AtlasEvent.Name.studyChanged || event.name.hasPrefix("calendar.") || event.name.hasPrefix("study.")
                 || event.name == AtlasEvent.Name.spaceActivated else { return }
@@ -259,21 +268,21 @@ final class StudyModel: ObservableObject {
 
     /// A chalk row checked off in the room: struck through at once, saved
     /// (and its reminder completed) a moment later.
-    func checkOff(_ id: UUID) {
+    func checkOff(_ id: UUID, syncReminders: Bool = true) {
         guard !struck.contains(id) else { return }
         struck.insert(id)
         refreshLive()
         Task {
             try? await Task.sleep(for: .milliseconds(1200))
-            setDone(true, id)
+            setDone(true, id, syncReminders: syncReminders)
             struck.remove(id)
             reload()
         }
     }
 
-    func setDone(_ done: Bool, _ id: UUID) {
+    func setDone(_ done: Bool, _ id: UUID, syncReminders: Bool = true) {
         do {
-            try assignments?.setDone(done, assignmentID: id)
+            try assignments?.setDone(done, assignmentID: id, syncReminders: syncReminders)
         } catch {
             core?.events.publish(AtlasEvent(AtlasEvent.Name.lockdownNotice, payload: [
                 "message": .string("Couldn't update Reminders: \(error.localizedDescription)"),
@@ -363,7 +372,14 @@ final class StudyModel: ObservableObject {
         refreshLive()
     }
 
+    /// The hourglass: asks what you want to get done first (if that's on).
     func startSession(minutes: Double? = nil, pomodoro: Bool? = nil) {
+        closeCard()
+        tasksUI.begin(minutes: minutes, pomodoro: pomodoro)
+    }
+
+    /// Starts the timer itself.
+    func beginSession(minutes: Double? = nil, pomodoro: Bool? = nil) {
         do {
             try sessions?.start(minutes: minutes, pomodoro: pomodoro)
             closeCard()
@@ -375,6 +391,13 @@ final class StudyModel: ObservableObject {
 
     func endSession() {
         sessions?.end(early: true)
+    }
+
+    /// The summary's unfinished tasks were carried over or cleared.
+    func markTasksDecided() {
+        guard let summary else { return }
+        sessions?.markTasksDecided(sessionID: summary.sessionID)
+        self.summary = sessions?.lastSummary
     }
 
     /// "Change": the session was about another course.

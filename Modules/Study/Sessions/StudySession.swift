@@ -88,11 +88,28 @@ public struct StudySummary: Codable, Equatable, Sendable {
     public var assignmentsCompleted: Int
     public var streak: Int
     public var endedEarly: Bool
+    /// The session's tasks, if it had any.
+    public var tasks: SessionTaskTally?
 
-    /// "1 h 40 m studied · 3 pomodoros · CHEM101 notes updated · 2 assignments checked off · streak 5 days"
+    public init(sessionID: UUID, focusedSeconds: TimeInterval, pomodoros: Int, courseCode: String?, guessReason: CourseGuess.Reason?,
+                notesUpdated: [String], assignmentsCompleted: Int, streak: Int, endedEarly: Bool, tasks: SessionTaskTally? = nil) {
+        self.sessionID = sessionID
+        self.focusedSeconds = focusedSeconds
+        self.pomodoros = pomodoros
+        self.courseCode = courseCode
+        self.guessReason = guessReason
+        self.notesUpdated = notesUpdated
+        self.assignmentsCompleted = assignmentsCompleted
+        self.streak = streak
+        self.endedEarly = endedEarly
+        self.tasks = tasks
+    }
+
+    /// "1 h 40 m studied · 3 pomodoros · 4 of 5 tasks done · CHEM101 notes updated · streak 5 days"
     public var headline: String {
         var parts = ["\(StudyMath.duration(focusedSeconds)) studied"]
         if pomodoros > 0 { parts.append("\(pomodoros) pomodoro\(pomodoros == 1 ? "" : "s")") }
+        if let tasks { parts.append(tasks.headline) }
         if !notesUpdated.isEmpty { parts.append("\(notesUpdated.joined(separator: ", ")) notes updated") }
         if assignmentsCompleted > 0 {
             parts.append("\(assignmentsCompleted) assignment\(assignmentsCompleted == 1 ? "" : "s") checked off")

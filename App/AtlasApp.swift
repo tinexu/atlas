@@ -83,7 +83,7 @@ struct AtlasApp: App {
                 .environmentObject(model.spaces)
         } label: {
             // A live lockdown or focus countdown (Stage 07).
-            MenuBarLabel(model: model, lockdown: model.lockdown)
+            MenuBarLabel(model: model, lockdown: model.lockdown, tasks: model.study.tasksUI)
         }
     }
 }

@@ -27,13 +27,16 @@ public struct CharacterView: View {
     let hover: SIMD2<Float>?
     /// A click: Mochi's picture does a happy hop.
     let petted: Bool
+    /// A task checked off: a hop with sparkles (a binky for the last one).
+    let celebration: MochiCelebration?
     @State private var scene = CharacterScene()
     @State private var snapshot: NSImage?
     @State private var frames: [MochiIdleFrame: NSImage] = [:]
 
     /// `accessories`: what Mochi wears here (the other characters ignore it).
     public init(settings: CompanionSettings, presentation: CharacterPresentation, paused: Bool, live: Bool = true,
-                accessories: [MochiAccessory] = [], hover: SIMD2<Float>? = nil, petted: Bool = false) {
+                accessories: [MochiAccessory] = [], hover: SIMD2<Float>? = nil, petted: Bool = false,
+                celebration: MochiCelebration? = nil) {
         self.settings = settings
         self.presentation = presentation
         self.paused = paused
@@ -41,6 +44,7 @@ public struct CharacterView: View {
         self.accessories = accessories
         self.hover = hover
         self.petted = petted
+        self.celebration = celebration
     }
 
     private var isMochi: Bool { CharacterSource.from(settings) == .procedural(.mochi) }
@@ -90,7 +94,7 @@ public struct CharacterView: View {
             Group {
                 if let base = frames[.base] {
                     MochiFlipbook(frames: frames, pose: presentation.mochi, animate: !still,
-                                  lookAt: hover, petted: petted)
+                                  lookAt: hover, petted: petted, celebration: celebration)
                         .opacity(presentation.opacity)
                         .id(ObjectIdentifier(base))
                 } else {
@@ -213,6 +217,17 @@ final class CharacterSnapshotter {
 
 // MARK: - Mochi's idle flipbook
 
+/// A task was checked off: Mochi hops with sparkles (`big`: the last task, a binky).
+public struct MochiCelebration: Equatable, Sendable {
+    public let id: UUID
+    public let big: Bool
+
+    public init(id: UUID = UUID(), big: Bool) {
+        self.id = id
+        self.big = big
+    }
+}
+
 /// Mochi idling from pre-rendered frames: breathing (a slow scale from the
 /// feet), random blinks every 3–6 s, an ear twitch every 8–15 s and an
 /// occasional nose wiggle, plus drifting z's when asleep. All of it is one
@@ -224,6 +239,7 @@ struct MochiFlipbook: NSViewRepresentable {
     let animate: Bool
     var lookAt: SIMD2<Float>? = nil
     var petted = false
+    var celebration: MochiCelebration?
 
     func makeNSView(context: Context) -> FlipbookView { FlipbookView() }
 
@@ -233,6 +249,7 @@ struct MochiFlipbook: NSViewRepresentable {
         let moves = animate && pose.breathPeriod > 0 && pose.effectsMove
         view.lean(towards: moves ? lookAt : nil)
         view.setPetted(petted, hop: moves, happy: frames[.happy] ?? frames[.base])
+        view.celebrate(celebration, moves: moves, happy: frames[.happy] ?? frames[.base])
     }
 
     /// Where Mochi's feet are in the picture, from the bottom (the breathing pivot).
@@ -315,34 +332,115 @@ struct MochiFlipbook: NSViewRepresentable {
         func setPetted(_ petted: Bool, hop moves: Bool, happy image: NSImage?) {
             defer { wasPetted = petted }
             guard petted, !wasPetted else { return }
+            showHappyFace(image, seconds: 1.0)
+            if moves { jump(height: 0.12, twist: 0, duration: 0.55) }
+        }
+
+        /// A task checked off: a small hop and a few sparkles; the last one,
+        /// a binky (higher, with a twist) and more. Without motion, just the
+        /// happy face.
+        func celebrate(_ celebration: MochiCelebration?, moves: Bool, happy image: NSImage?) {
+            guard let celebration, celebration.id != celebrated else { return }
+            celebrated = celebration.id
+            showHappyFace(image, seconds: celebration.big ? 1.6 : 1.1)
+            guard moves else { return }
+            if celebration.big {
+                jump(height: 0.22, twist: 0.35, duration: 0.8)
+                sparkle(count: 8, delay: 0.3)
+            } else {
+                jump(height: 0.1, twist: 0, duration: 0.5)
+                sparkle(count: 5, delay: 0.18)
+            }
+        }
+
+        private var celebrated: UUID?
+
+        private func showHappyFace(_ image: NSImage?, seconds: Double) {
             happy.contents = image?.cgImage(forProposedRect: nil, context: nil, hints: nil)
             let face = CAKeyframeAnimation(keyPath: "opacity")
             face.values = [1, 1, 0]
             face.keyTimes = [0, 0.85, 1]
-            face.duration = 1.0
+            face.duration = seconds
             happy.add(face, forKey: "happy")
             let hide = CAKeyframeAnimation(keyPath: "opacity")
             hide.values = [0, 0, 1]
             hide.keyTimes = [0, 0.85, 1]
-            hide.duration = 1.0
+            hide.duration = seconds
             self.image.add(hide, forKey: "happy")
-            guard moves else { return }
-            let up = bounds.height * 0.12
+        }
+
+        /// Crouch, up (stretched, twisting for a binky), land with an 8% squash.
+        private func jump(height: CGFloat, twist: CGFloat, duration: Double) {
+            let up = bounds.height * height
+            let top = CATransform3DRotate(CATransform3DScale(CATransform3DMakeTranslation(0, up, 0), 0.97, 1.05, 1), twist, 0, 0, 1)
             let jump = CAKeyframeAnimation(keyPath: "transform")
             jump.values = [
                 CATransform3DIdentity,
-                CATransform3DMakeScale(1.04, 0.94, 1),                                       // crouch
-                CATransform3DScale(CATransform3DMakeTranslation(0, up, 0), 0.97, 1.05, 1),   // up, stretched
+                CATransform3DMakeScale(1.04, 0.94, 1),
+                top,
                 CATransform3DIdentity,
-                CATransform3DMakeScale(1.04, 0.92, 1),                                       // 8% squash on landing
+                CATransform3DMakeScale(1.04, 0.92, 1),
                 CATransform3DIdentity,
             ].map { NSValue(caTransform3D: $0) }
             jump.keyTimes = [0, 0.12, 0.45, 0.75, 0.85, 1]
             jump.timingFunctions = [CAMediaTimingFunction(name: .easeOut), CAMediaTimingFunction(name: .easeOut),
                                     CAMediaTimingFunction(name: .easeIn), CAMediaTimingFunction(name: .easeOut),
                                     CAMediaTimingFunction(name: .easeInEaseOut)]
-            jump.duration = 0.55
+            jump.duration = duration
             hop.add(jump, forKey: "hop")
+        }
+
+        /// Tiny pink and white stars that burst out around the head and fade.
+        private func sparkle(count: Int, delay: Double) {
+            let centre = CGPoint(x: bounds.midX, y: bounds.height * 0.62)
+            let size = bounds.height * 0.07
+            let begin = CACurrentMediaTime() + delay
+            for index in 0..<count {
+                let star = CAShapeLayer()
+                star.path = Self.starPath(size)
+                star.fillColor = index % 2 == 0 ? CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+                    : CGColor(srgbRed: 1, green: 0.62, blue: 0.74, alpha: 1)
+                star.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+                star.position = centre
+                star.opacity = 0
+                layer?.addSublayer(star)
+                let angle = Double(index) / Double(count) * 2 * .pi + 0.3
+                let distance = bounds.height * (0.3 + 0.06 * Double(index % 3))
+                let move = CABasicAnimation(keyPath: "position")
+                move.fromValue = NSValue(point: centre)
+                move.toValue = NSValue(point: CGPoint(x: centre.x + cos(angle) * distance, y: centre.y + sin(angle) * distance * 0.8))
+                move.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                let fade = CAKeyframeAnimation(keyPath: "opacity")
+                fade.values = [0, 1, 1, 0]
+                fade.keyTimes = [0, 0.15, 0.55, 1]
+                let grow = CAKeyframeAnimation(keyPath: "transform.scale")
+                grow.values = [0.2, 1.1, 0.6]
+                let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+                spin.toValue = Double.pi / 2
+                let group = CAAnimationGroup()
+                group.animations = [move, fade, grow, spin]
+                group.duration = 0.9
+                group.beginTime = begin
+                group.fillMode = .backwards
+                group.isRemovedOnCompletion = true
+                star.add(group, forKey: "sparkle")
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay + 1) { star.removeFromSuperlayer() }
+            }
+        }
+
+        private static func starPath(_ size: CGFloat) -> CGPath {
+            let path = CGMutablePath()
+            let c = size / 2, inner = size * 0.13
+            path.move(to: CGPoint(x: c, y: 0))
+            path.addLine(to: CGPoint(x: c + inner, y: c - inner))
+            path.addLine(to: CGPoint(x: size, y: c))
+            path.addLine(to: CGPoint(x: c + inner, y: c + inner))
+            path.addLine(to: CGPoint(x: c, y: size))
+            path.addLine(to: CGPoint(x: c - inner, y: c + inner))
+            path.addLine(to: CGPoint(x: 0, y: c))
+            path.addLine(to: CGPoint(x: c - inner, y: c - inner))
+            path.closeSubpath()
+            return path
         }
 
         required init?(coder: NSCoder) { nil }

@@ -28,6 +28,9 @@ struct StudySummaryCard: View {
                 Text(summary.headline)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
+                if let tasks = summary.tasks {
+                    SummaryTasksSection(tally: tasks, sessionID: summary.sessionID)
+                }
                 HStack(spacing: 6) {
                     if let code = summary.courseCode, let course = study.courses.first(where: { $0.code == code }) {
                         RoundedRectangle(cornerRadius: 2).fill(Color(nsColor: NSColor(atlasHex: course.color))).frame(width: 6, height: 16)
@@ -147,6 +150,7 @@ struct StudyStatsView: View {
                 .chartYAxisLabel("Hours")
                 .frame(height: 180)
             }
+            TaskStats()
             HStack {
                 Spacer()
                 Button("Close") { study.closeCard() }.keyboardShortcut(.defaultAction)
@@ -168,6 +172,42 @@ struct StudyStatsView: View {
             let course = row.courseID.flatMap { id in study.courses.first { $0.id == id } }
             return Bar(week: row.weekStart, course: course?.displayCode ?? "No course",
                        color: Color(nsColor: NSColor(atlasHex: course?.color ?? "#B8BCCB")), hours: row.hours)
+        }
+    }
+}
+
+/// Tasks checked off per day this week, and per course.
+private struct TaskStats: View {
+    @EnvironmentObject private var study: StudyModel
+
+    private struct Day: Identifiable {
+        let id = UUID()
+        let day: Date
+        let count: Int
+    }
+
+    var body: some View {
+        let tasks = study.module?.tasks
+        let days = (tasks?.completedPerDay() ?? []).map { Day(day: $0.day, count: $0.count) }
+        let courses = tasks?.completedPerCourse() ?? []
+        if days.contains(where: { $0.count > 0 }) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tasks done · \(days.reduce(0) { $0 + $1.count }) this week").font(.subheadline.weight(.semibold))
+                Chart(days) { day in
+                    BarMark(x: .value("Day", day.day, unit: .day), y: .value("Tasks", day.count))
+                        .foregroundStyle(Color.green.gradient)
+                }
+                .chartXAxis { AxisMarks(values: .stride(by: .day)) { _ in AxisValueLabel(format: .dateTime.weekday(.narrow)) } }
+                .frame(height: 90)
+                HStack(spacing: 10) {
+                    ForEach(Array(courses.prefix(5).enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: 4) {
+                            Circle().fill(Color(nsColor: NSColor(atlasHex: row.link?.color ?? "#B8BCCB"))).frame(width: 7, height: 7)
+                            Text("\(row.link?.label ?? "No course") \(row.count)").font(.caption)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -220,6 +260,23 @@ struct StudySettingsView: View {
                     Text("Profiles")
                 } footer: {
                     Text("Default plays the playlist (a Spotify URI or link) with the course of the moment. Reading and Problem set open PDFs with the reader (an app's bundle ID). The calculator is a link or an app's bundle ID.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    Toggle("Ask what you want to get done at the start", isOn: $settings.tasks.promptAtStart)
+                    LabeledContent("Quick add shortcut") {
+                        TextField("opt+shift+t", text: $settings.tasks.quickAddHotKey).frame(width: 140)
+                    }
+                    Toggle("Check in at breaks (“Did you finish …?”)", isOn: $settings.tasks.breakCheckIn)
+                    Picker("Unfinished tasks", selection: $settings.tasks.carryOver) {
+                        ForEach(SessionTaskSettings.CarryOver.allCases) { Text($0.title).tag($0) }
+                    }
+                    Toggle("Mochi celebrates finished tasks", isOn: $settings.tasks.celebrations)
+                    Toggle("Checking off a task completes its assignment in Reminders", isOn: $settings.tasks.syncAssignments)
+                } header: {
+                    Text("Session tasks")
+                } footer: {
+                    Text("Type “x2” or “🍅2” at the end of a task for an estimate, and “#CHEM101” to link a course. The quick add shortcut works from any app; write it like “opt+shift+t” or “cmd+ctrl+t”.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 AssignmentSourcesSection(settings: $settings)

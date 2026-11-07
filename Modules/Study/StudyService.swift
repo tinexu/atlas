@@ -40,6 +40,8 @@ public struct StudySettings: Codable, Equatable, Sendable {
     public var pdfReader = "com.apple.Preview"
     /// The Problem set profile's calculator: a link or an app's bundle ID.
     public var calculator = "https://www.desmos.com/calculator"
+    /// Session tasks: the start prompt, quick add, break check-in, carry-over.
+    public var tasks = SessionTaskSettings()
     public var pomodoro: PomodoroSettings = {
         var settings = PomodoroSettings()
         settings.focusMinutes = 25
@@ -59,6 +61,7 @@ public struct StudySettings: Codable, Equatable, Sendable {
         sessionMinutes = try c.decodeIfPresent(Int.self, forKey: .sessionMinutes) ?? defaults.sessionMinutes
         usesPomodoro = try c.decodeIfPresent(Bool.self, forKey: .usesPomodoro) ?? defaults.usesPomodoro
         pomodoro = try c.decodeIfPresent(PomodoroSettings.self, forKey: .pomodoro) ?? defaults.pomodoro
+        tasks = try c.decodeIfPresent(SessionTaskSettings.self, forKey: .tasks) ?? defaults.tasks
         assignmentCalendarIDs = try c.decodeIfPresent([String].self, forKey: .assignmentCalendarIDs) ?? []
         remindersListID = try c.decodeIfPresent(String.self, forKey: .remindersListID)
         flashcards = try c.decodeIfPresent(String.self, forKey: .flashcards) ?? defaults.flashcards

@@ -31,6 +31,7 @@ struct MenuBarContent: View {
         }
 
         LockdownMenuItems(lockdown: model.lockdown)
+        StudyTaskMenuItems(tasks: model.study.tasksUI)
 
         if let focus = model.core?.time?.focus {
             Section("Focus") {
@@ -108,5 +109,25 @@ struct CompanionMenuItems: View {
     var body: some View {
         Button(companion.isVisible ? "Hide Companion" : "Show Companion") { companion.setVisible(!companion.isVisible) }
         Button("Command Palette…") { companion.showPalette() }
+    }
+}
+
+/// The study session's tasks, compact: check one off, or add one.
+struct StudyTaskMenuItems: View {
+    @ObservedObject var tasks: StudyTasksModel
+
+    var body: some View {
+        if tasks.isRunning {
+            Section("Tasks · \(tasks.list.finished.count) of \(tasks.list.tasks.count) done") {
+                ForEach(tasks.list.open.prefix(6)) { task in
+                    Toggle(task.id == tasks.current?.id ? "▸ \(task.title)" : task.title, isOn: Binding(
+                        get: { false }, set: { _ in tasks.check(task.id) }
+                    ))
+                }
+                Button("Add Task…") { tasks.showQuickAdd() }
+                Button("Show Session Window") { tasks.showPanel(activate: true) }
+            }
+            Divider()
+        }
     }
 }

@@ -158,7 +158,7 @@ struct CompanionOverlayView: View {
     var body: some View {
         CharacterView(settings: controller.settings, presentation: controller.presentation, paused: controller.isRenderingPaused,
                       live: controller.isAnimating, accessories: controller.mochiAccessories,
-                      hover: controller.hover, petted: controller.isPetted)
+                      hover: controller.hover, petted: controller.isPetted, celebration: controller.celebration)
             .overlay {
                 // Gestures on a clear layer so the 3D view never swallows them.
                 GeometryReader { proxy in

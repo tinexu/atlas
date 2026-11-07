@@ -7,6 +7,8 @@ public final class StudyModule: @unchecked Sendable {
     public let service: StudyService
     public let sessions: StudySessions
     public let assignments: AssignmentService
+    /// Session tasks (the to-do list for a study session).
+    public let tasks: StudyTasks
     public let automations: StudyAutomations
     public let weather: WeatherService
     private let actionContext = StudyActionContext()
@@ -18,7 +20,13 @@ public final class StudyModule: @unchecked Sendable {
         sessions = StudySessions(core: core, courses: service)
         assignments = AssignmentService(core: core, courses: service, reminders: reminders)
         assignments.onCompleted = { [weak sessions] ids in sessions?.noteCompleted(ids) }
+        tasks = StudyTasks(core: core, courses: service, assignments: assignments)
+        tasks.sessions = sessions
+        sessions.tasks = tasks
         sessions.restore()
+        if core.registry.descriptor(for: AddSessionTaskAction.id) == nil {
+            try core.registry.register(AddSessionTaskAction(tasks: tasks))
+        }
         if core.registry.descriptor(for: OpenCalendarDayAction.id) == nil {
             try core.registry.register(OpenCalendarDayAction())
         }

@@ -640,11 +640,13 @@ struct LockdownMenuItems: View {
 struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     @ObservedObject var lockdown: LockdownModel
+    /// The study session's current task, shown after the countdown.
+    @ObservedObject var tasks: StudyTasksModel
 
     var body: some View {
         if let menuBar = lockdown.menuBar {
             Image(systemName: menuBar.symbol)
-            Text(menuBar.text)
+            Text(tasks.menuBarTitle.map { "\(menuBar.text) · \($0)" } ?? menuBar.text)
         } else {
             Image(systemName: model.isPaused ? "pause.circle" : "globe.americas.fill")
         }

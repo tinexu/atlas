@@ -127,11 +127,12 @@ public final class AssignmentService: @unchecked Sendable {
     // MARK: - Changing
 
     /// Checks something off (or back on). Every source row of it changes;
-    /// a reminder is marked complete in Reminders too (never un-completed).
-    public func setDone(_ done: Bool, assignmentID: UUID) throws {
+    /// a reminder is marked complete in Reminders too (never un-completed),
+    /// unless `syncReminders` is off.
+    public func setDone(_ done: Bool, assignmentID: UUID, syncReminders: Bool = true) throws {
         guard let merged = all().first(where: { $0.all.contains { $0.id == assignmentID } }) else { return }
         for var row in merged.all where row.isDone != done {
-            if done, row.source == .reminders, let id = row.externalID {
+            if done, syncReminders, row.source == .reminders, let id = row.externalID {
                 try reminders.complete(id: id)
             }
             row.isDone = done

@@ -33,6 +33,8 @@ public final class StudySessions: @unchecked Sendable {
 
     let core: AtlasCore
     let courses: StudyService
+    /// The session's task list (set by `StudyModule`).
+    weak var tasks: StudyTasks?
     var store: AtlasStore { core.store }
     private let lock = NSLock()
     private var active: Active?
@@ -118,6 +120,7 @@ public final class StudySessions: @unchecked Sendable {
         let active = Active(session: session, goalSeconds: goal, usesPomodoro: usesPomodoro, phase: PomodoroPhase())
         lock.withLock { self.active = active }
         save()
+        tasks?.sessionStarted(session.id)
         let cycle = makeCycle(focus: focus, active: active, settings: settings)
         cycle.start(.focus)
         publishChange(announce: false)
@@ -158,6 +161,14 @@ public final class StudySessions: @unchecked Sendable {
     /// Remembers a clicked course book, for guessing the session's course.
     public func noteCourseOpened(_ courseID: UUID) {
         lock.withLock { lastClick = (courseID, now) }
+    }
+
+    /// The summary's unfinished tasks were carried over or cleared.
+    public func markTasksDecided(sessionID: UUID) {
+        guard var summary = lastSummary, summary.sessionID == sessionID, summary.tasks != nil else { return }
+        summary.tasks?.unfinished = 0
+        lock.withLock { _lastSummary = summary }
+        try? store.setPreference(summary, for: Self.summaryKey)
     }
 
     /// "Change": the session was about another course.
@@ -225,11 +236,21 @@ public final class StudySessions: @unchecked Sendable {
         }
         cycle.onChange = { [weak self] phase in
             guard let self else { return }
-            self.lock.withLock { self.active?.phase = phase }
+            let previous = self.lock.withLock { () -> PomodoroPhase? in
+                defer { self.active?.phase = phase }
+                return self.active?.phase
+            }
             self.save()
+            // A pomodoro finished: credit the task that was current for most of it.
+            if let previous, phase.completedFocus > previous.completedFocus { self.tasks?.pomodoroFinished() }
+            // A focus phase began.
+            if phase.kind == .focus, let id = phase.sessionID, previous?.sessionID != id || previous?.kind != .focus {
+                self.tasks?.focusBegan()
+            }
         }
         cycle.onPhase = { [weak self] _, kind, minutes, announce in
             guard let self, announce else { return }
+            if kind != .focus { self.tasks?.breakBegan() }
             let system = self.core.system
             Task {
                 try? await system.postNotification(title: kind == .focus ? "Back to studying" : "Break time",
@@ -293,12 +314,13 @@ public final class StudySessions: @unchecked Sendable {
         try? store.saveStudySession(session)
         try? store.setPreference(Active?.none, for: Self.activeKey)
 
-        let summary = StudySummary(
+        var summary = StudySummary(
             sessionID: session.id, focusedSeconds: session.focusedSeconds, pomodoros: session.pomodoros,
             courseCode: session.courseID.flatMap { courses.course(id: $0)?.code }, guessReason: session.guess?.reason,
             notesUpdated: counts.keys.compactMap { courses.course(id: $0)?.code }.sorted(),
             assignmentsCompleted: session.completedAssignments.count, streak: streak(), endedEarly: early
         )
+        summary.tasks = tasks?.sessionEnded(session.id)
         lock.withLock {
             _lastSummary = summary
             _finished += 1
@@ -337,6 +359,7 @@ public final class StudySessions: @unchecked Sendable {
             return
         }
         _ = makeCycle(focus: focus, active: saved, settings: courses.settings)
+        if saved.phase.kind == .focus { tasks?.focusBegan() }
         publishChange(announce: false)
     }
 }

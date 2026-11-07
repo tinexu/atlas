@@ -94,6 +94,8 @@ public final class CompanionController: ObservableObject {
     @Published public private(set) var hover: SIMD2<Float>?
     /// A click or "Pet Mochi": one happy hop.
     @Published public private(set) var isPetted = false
+    /// A session task was checked off: a hop with sparkles (a binky for the last).
+    @Published public private(set) var celebration: MochiCelebration?
     private var petWork: DispatchWorkItem?
     private var hold = StudyHold() {
         didSet { held = hold.held }
@@ -306,6 +308,8 @@ public final class CompanionController: ObservableObject {
             refreshRoom()
         case AtlasEvent.Name.spaceDeactivatedEvent:
             refreshRoom()
+        case AtlasEvent.Name.sessionTaskCompleted where event.payload["celebrate"]?.boolValue != false:
+            celebration = MochiCelebration(big: event.payload["last"]?.boolValue == true)
         case _ where event.name.hasPrefix("lockdown."):
             lockdownEndsAt = core.time?.lockdown.session?.endsAt
         case _ where event.name.hasPrefix("focus."):

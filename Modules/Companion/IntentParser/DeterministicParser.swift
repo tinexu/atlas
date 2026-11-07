@@ -50,6 +50,7 @@ public struct DeterministicParser: Sendable {
     public func parse(_ raw: String) -> ParseOutcome {
         let text = Self.clean(raw)
         guard !text.isEmpty else { return .unknown("Type a command, like “open my coding room”.") }
+        if let plan = taskPlan(raw) { return .plan(plan) }
         let (verb, rest) = Self.splitVerb(text)
 
         if let plan = storagePlan(text) { return .plan(plan) }
@@ -165,6 +166,24 @@ public struct DeterministicParser: Sendable {
             return CommandPlan(kind: .open(screen.destination), summary: "Open \(screen.title)", hasSideEffects: false, subject: screen.title)
         }
         return nil
+    }
+
+    // MARK: - Session tasks
+
+    /// The action that adds a session task (registered by the Study Library).
+    public static let addTaskActionID: ActionID = "task.add"
+
+    /// "add task finish lab report", "todo outline essay x2 #ENG110": adds
+    /// a task to the current session. The title keeps its case and shortcuts.
+    func taskPlan(_ raw: String) -> CommandPlan? {
+        let pattern = #"^\s*(?:add\s+(?:a\s+)?(?:task|to-?do)|new\s+task|to-?do|task)\s*:?\s+(.+?)\s*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let range = Range(match.range(at: 1), in: raw)
+        else { return nil }
+        let title = String(raw[range])
+        return CommandPlan(kind: .actions([.init(Self.addTaskActionID, ["title": .string(title)])]), summary: "Add task “\(title)”",
+                           hasSideEffects: false, subject: "Tasks")
     }
 
     // MARK: - Automations and focus

@@ -154,6 +154,11 @@ final class AppModel: ObservableObject {
             creative.showStats()
             return
         }
+        if link == "atlas://study/session" {
+            // The study session window (the running session, or "What do you want to get done?").
+            study.tasksUI.openSessionWindow()
+            return
+        }
         guard link == "atlas://study/board" else { return }
         section = .spaces
         if let id = study.studySpaceID { spaces.selectedSpaceID = id }
@@ -313,8 +318,22 @@ final class AppModel: ObservableObject {
         host.holdsSuggestionsWhileStudying = { [weak self] in self?.study.settings.holdSuggestions ?? true }
         host.holdsSuggestionsWhileCreating = { [weak self] in self?.creative.settings.quietDuringSessions ?? true }
         host.extraMenuItems = { [weak self] in
-            guard let self, self.creative.isWatching, let project = self.creative.currentProject else { return [] }
-            return [CompanionHost.MenuItem(title: "Save Video to \(project.name)", symbol: "bookmark") { [weak self] in self?.creative.saveTutorial() }]
+            guard let self else { return [] }
+            var items: [CompanionHost.MenuItem] = []
+            if self.creative.isWatching, let project = self.creative.currentProject {
+                items.append(CompanionHost.MenuItem(title: "Save Video to \(project.name)", symbol: "bookmark") { [weak self] in self?.creative.saveTutorial() })
+            }
+            // The study session's tasks: click one to check it off.
+            let tasks = self.study.tasksUI
+            if tasks.isRunning {
+                for task in tasks.list.open.prefix(5) {
+                    items.append(CompanionHost.MenuItem(title: task.title, symbol: task.id == tasks.current?.id ? "circle.inset.filled" : "circle") {
+                        tasks.check(task.id)
+                    })
+                }
+                items.append(CompanionHost.MenuItem(title: "Add Task…", symbol: "plus") { tasks.showQuickAdd() })
+            }
+            return items
         }
         host.mochiRoom = { [weak self] in
             guard let self, let core = self.core else { return .desktop }
