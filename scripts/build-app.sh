@@ -33,6 +33,18 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/ATLAS" "$APP/Contents/MacOS/ATLAS"
 
+# The app icon, made in Icon Composer (Assets/AppIcon.icon). actool turns it
+# into Assets.car (the Liquid Glass icon on macOS 26) and AppIcon.icns (the
+# flat icon on earlier macOS). Edit it by opening the .icon in Icon Composer.
+ICON="$ROOT/Assets/AppIcon.icon"
+ICON_KEYS=""
+if [ -d "$ICON" ]; then
+    xcrun actool "$ICON" --compile "$APP/Contents/Resources" --app-icon AppIcon \
+        --platform macosx --target-device mac --minimum-deployment-target 15.0 \
+        --output-partial-info-plist "$(mktemp -t atlas-icon).plist" >/dev/null
+    ICON_KEYS="<key>CFBundleIconFile</key><string>AppIcon</string><key>CFBundleIconName</key><string>AppIcon</string>"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -48,6 +60,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>    <string>15.0</string>
     <key>LSApplicationCategoryType</key> <string>public.app-category.productivity</string>
     <key>NSHighResolutionCapable</key>   <true/>
+    ${ICON_KEYS}
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>ATLAS shows your calendar events on the Time Architect timeline and suggests the right Space before they start. It only changes a calendar if you allow writing to it.</string>
     <key>NSCalendarsUsageDescription</key>

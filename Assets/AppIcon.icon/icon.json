@@ -1,0 +1,61 @@
+{
+  "fill" : {
+    "automatic-gradient" : "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "hidden" : false,
+          "image-name" : "07_ATLAS_Emblem.png",
+          "name" : "07_ATLAS_Emblem"
+        },
+        {
+          "image-name" : "06_Mochi_Bunny.png",
+          "name" : "06_Mochi_Bunny"
+        },
+        {
+          "image-name" : "05_Room_Symbols.png",
+          "name" : "05_Room_Symbols"
+        },
+        {
+          "image-name" : "04_Shelves_and_Candle.png",
+          "name" : "04_Shelves_and_Candle"
+        },
+        {
+          "image-name" : "03_Portal_Architecture.png",
+          "name" : "03_Portal_Architecture"
+        },
+        {
+          "image-name" : "02_Three_Workspaces.png",
+          "name" : "02_Three_Workspaces"
+        },
+        {
+          "image-name" : "01_Night_and_Room 2.png",
+          "name" : "01_Night_and_Room 2",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
