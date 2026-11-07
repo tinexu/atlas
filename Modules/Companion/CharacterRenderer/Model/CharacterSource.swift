@@ -1,8 +1,10 @@
 import Foundation
 
-/// Where a character's model comes from. The three built-in characters are
-/// built from primitives at runtime; a USDZ (e.g. exported from Blender)
-/// can replace them once it passes `CharacterLimits`.
+/// Where a character's model comes from. The built-in characters (Mochi,
+/// the robot, creature and orb) are built from primitives at runtime; a
+/// USDZ (e.g. exported from Blender) can replace them once it passes
+/// `CharacterLimits`. A USDZ whose nodes use `MochiJoint` names is posed
+/// like Mochi.
 public enum CharacterSource: Equatable, Sendable {
     case procedural(CompanionSettings.Character)
     case usdz(URL)
@@ -11,7 +13,7 @@ public enum CharacterSource: Equatable, Sendable {
         if settings.character == .custom, let path = settings.customCharacterPath {
             return .usdz(URL(fileURLWithPath: path))
         }
-        return .procedural(settings.character == .custom ? .robot : settings.character)
+        return .procedural(settings.character == .custom ? .mochi : settings.character)
     }
 }
 

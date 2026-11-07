@@ -1,11 +1,14 @@
 import AppKit
 import AtlasCompanion
+import AtlasSpaces
+import AtlasSpacesUI
 import RealityKit
 
 /// The Companion character in RealityKit, built from primitives so no
-/// external assets are needed: a floating robot, a round creature or a
-/// geometric orb, in your colours, with an optional accessory. A USDZ
-/// character can replace the body (it keeps the same states).
+/// external assets are needed: Mochi the bunny (the default; see
+/// `MochiAnimator`), a floating robot, a round creature or a geometric
+/// orb, in your colours, with an optional accessory. A USDZ character can
+/// replace the body (it keeps the same states).
 ///
 /// Motion uses RealityKit's own looping animations, so a still character
 /// costs nothing per frame from ATLAS.
@@ -27,8 +30,13 @@ final class CharacterScene {
     /// The open book held while reading.
     private var heldBook: Entity?
     private var lastPresentation: CharacterPresentation?
+    /// Set while the character is Mochi.
+    private var mochi: MochiAnimator?
+    /// False for the off-screen snapshot renderer: poses snap, nothing loops.
+    private let live: Bool
 
-    init() {
+    init(live: Bool = true) {
+        self.live = live
         camera.camera.fieldOfViewInDegrees = 32
         camera.look(at: [0, 0.02, 0], from: [0, 0.3, 3.6], relativeTo: nil)
         root.addChild(camera)
@@ -46,16 +54,37 @@ final class CharacterScene {
 
     // MARK: - Building
 
-    func build(_ settings: CompanionSettings) {
+    func build(_ settings: CompanionSettings, accessories: [MochiAccessory] = []) {
         let source = CharacterSource.from(settings)
-        let look = "\(settings.primaryColor)|\(settings.secondaryColor)|\(settings.accessory.rawValue)"
+        let look = source == .procedural(.mochi)
+            ? "mochi|\(settings.mochi.look.key)|\(accessories.map(\.rawValue).joined(separator: ","))"
+            : "\(settings.primaryColor)|\(settings.secondaryColor)|\(settings.accessory.rawValue)"
         guard built?.source != source || built?.look != look else { return }
         built = (source, look)
         body.removeFromParent()
+        mochi?.pause()
+        mochi = nil
+        heldBook?.removeFromParent()
+        heldBook = nil
         accents = []
         eyes = []
         let primary = NSColor(companionHex: settings.primaryColor) ?? .systemBlue
         let secondary = NSColor(companionHex: settings.secondaryColor) ?? .white
+        if source == .procedural(.mochi) {
+            let animator = MochiAnimator(look: settings.mochi.look, accessories: accessories, live: live)
+            mochi = animator
+            body = animator.holder
+            turn.addChild(body)
+            float.transform = .identity
+            turn.transform = .identity
+            floatController?.stop()
+            spinController?.stop()
+            if let lastPresentation {
+                self.lastPresentation = nil
+                apply(lastPresentation)
+            }
+            return
+        }
         let character: Entity
         let anchors: Anchors
         switch source {
@@ -215,6 +244,12 @@ final class CharacterScene {
         guard presentation != lastPresentation else { return }
         let previous = lastPresentation
         lastPresentation = presentation
+        if let mochi {
+            // Mochi shows states by pose and expression; colour stays its own.
+            body.components.set(OpacityComponent(opacity: Float(presentation.opacity)))
+            mochi.apply(presentation.mochi, reading: presentation.isReading)
+            return
+        }
 
         let glow = NSColor(companionHex: presentation.accent) ?? .systemTeal
         for entity in accents { entity.model?.materials = [UnlitMaterial(color: glow)] }
@@ -310,16 +345,26 @@ final class CharacterScene {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { MainActor.assumeIsolated(work) }
     }
 
-    /// Stops every animation (hidden, locked screen, Low Power Mode).
+    /// Stops every animation (hidden, locked screen, Low Power Mode, or
+    /// the live view is off screen).
     func pause() {
         floatController?.pause()
         spinController?.pause()
+        mochi?.pause()
     }
 
     func resume() {
         floatController?.resume()
         spinController?.resume()
+        mochi?.resume()
     }
+
+    /// Poses one frame of Mochi's idle loop (the snapshot renderer).
+    func showIdleFrame(_ frame: MochiIdleFrame) {
+        mochi?.showFrame(frame)
+    }
+
+    var mochiFigure: MochiFigure? { mochi?.figure }
 }
 
 extension NSColor {

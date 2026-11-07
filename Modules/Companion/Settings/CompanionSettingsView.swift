@@ -1,6 +1,7 @@
 import AppKit
 import AtlasCompanion
 import AtlasCore
+import AtlasSpaces
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -58,12 +59,14 @@ public struct CompanionSettingsView: View {
 
     private var characterSection: some View {
         Section {
+            characterPicker
             HStack(alignment: .top, spacing: 20) {
                 VStack(spacing: 8) {
                     CharacterView(settings: settings,
                                   presentation: .make(for: previewState, intensity: settings.intensity,
-                                                      reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion),
-                                  paused: false)
+                                                      reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                                                      petted: controller.isPetted),
+                                  paused: false, accessories: controller.mochiAccessories)
                         .frame(width: 150, height: 150)
                         .background(Color.black.opacity(0.25), in: RoundedRectangle(cornerRadius: 12))
                     Picker("Preview", selection: $previewState) {
@@ -71,11 +74,17 @@ public struct CompanionSettingsView: View {
                     }
                     .labelsHidden()
                     .frame(width: 150)
+                    if settings.character == .mochi {
+                        Button {
+                            previewState = .idle
+                            controller.pet()
+                        } label: {
+                            Label("Pet Mochi", systemImage: "hand.wave")
+                        }
+                        .help("Plays Mochi's happy hop, to try the animations")
+                    }
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    Picker("Character", selection: binding(\.character)) {
-                        ForEach(CompanionSettings.Character.allCases) { Text($0.title).tag($0) }
-                    }
                     if settings.character == .custom {
                         HStack {
                             Text(settings.customCharacterPath.map { ($0 as NSString).lastPathComponent } ?? "No file chosen")
@@ -86,14 +95,18 @@ public struct CompanionSettingsView: View {
                         Text("Up to \(CharacterLimits.maxTriangles.formatted()) polygons and \(ByteCountFormatter.string(fromByteCount: CharacterLimits.maxFileBytes, countStyle: .file)). Accessories don't apply to custom characters.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    HStack {
-                        ColorPicker("Primary", selection: colorBinding(\.primaryColor), supportsOpacity: false)
-                        ColorPicker("Secondary", selection: colorBinding(\.secondaryColor), supportsOpacity: false)
+                    if settings.character == .mochi {
+                        mochiLook
+                    } else {
+                        HStack {
+                            ColorPicker("Primary", selection: colorBinding(\.primaryColor), supportsOpacity: false)
+                            ColorPicker("Secondary", selection: colorBinding(\.secondaryColor), supportsOpacity: false)
+                        }
+                        Picker("Accessory", selection: binding(\.accessory)) {
+                            ForEach(CompanionSettings.Accessory.allCases) { Text($0.title).tag($0) }
+                        }
+                        .disabled(settings.character == .custom)
                     }
-                    Picker("Accessory", selection: binding(\.accessory)) {
-                        ForEach(CompanionSettings.Accessory.allCases) { Text($0.title).tag($0) }
-                    }
-                    .disabled(settings.character == .custom)
                     Picker("Size", selection: binding(\.size)) {
                         ForEach(CompanionSettings.Size.allCases) { Text($0.title).tag($0) }
                     }
@@ -102,13 +115,138 @@ public struct CompanionSettingsView: View {
                         ForEach(CompanionSettings.Intensity.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    Text("Reduced swaps motion for colour changes; Still shows a picture. Reduce Motion in System Settings is always respected. The look never changes what the Companion can do.")
+                    Text("Reduced keeps expressions (eyes, mouth, ears) and drops hops, bounces and sparkles; Still shows a picture. Reduce Motion in System Settings is always respected. The look never changes what the Companion can do.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            if settings.character == .mochi { mochiAccessories }
         } header: {
             Text("Character")
         }
+    }
+
+    /// One tile per character, each a small preview of itself.
+    private var characterPicker: some View {
+        HStack(spacing: 10) {
+            ForEach(CompanionSettings.Character.allCases) { character in
+                Button {
+                    if character == .custom && settings.customCharacterPath == nil {
+                        chooseCustom()
+                    } else {
+                        controller.update { $0.character = character }
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Group {
+                            if character == .custom {
+                                Image(systemName: "cube.transparent").font(.title2).foregroundStyle(.secondary)
+                            } else {
+                                CharacterView(settings: tileSettings(character),
+                                              presentation: .make(for: .idle, intensity: settings.intensity,
+                                                                  reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion),
+                                              paused: false, live: false, accessories: character == .mochi ? controller.mochiAccessories : [])
+                            }
+                        }
+                        .frame(width: 64, height: 64)
+                        Text(character.title).font(.caption).lineLimit(1)
+                    }
+                    .padding(6)
+                    .frame(width: 92)
+                    .background(settings.character == character ? Color.accentColor.opacity(0.18) : Color.black.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10)
+                        .stroke(settings.character == character ? Color.accentColor : .clear, lineWidth: 2))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(character.title)
+                .accessibilityAddTraits(settings.character == character ? .isSelected : [])
+            }
+        }
+    }
+
+    private func tileSettings(_ character: CompanionSettings.Character) -> CompanionSettings {
+        var copy = settings
+        copy.character = character
+        return copy
+    }
+
+    private func mochiBinding<T>(_ keyPath: WritableKeyPath<MochiSettings, T>) -> Binding<T> {
+        Binding(get: { controller.settings.mochi[keyPath: keyPath] }, set: { value in controller.update { $0.mochi[keyPath: keyPath] = value } })
+    }
+
+    /// Colour presets, custom colours and the floppy ear.
+    @ViewBuilder
+    private var mochiLook: some View {
+        let look = settings.mochi.look
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Colours").font(.subheadline)
+            HStack(spacing: 8) {
+                ForEach(MochiPreset.allCases) { preset in
+                    let palette = preset.palette
+                    Button {
+                        controller.update { $0.mochi.look.choose(preset) }
+                    } label: {
+                        ZStack {
+                            Circle().fill(swatch(palette.fur))
+                            Circle().trim(from: 0.5, to: 1).fill(swatch(palette.accent)).rotationEffect(.degrees(45))
+                        }
+                        .frame(width: 26, height: 26)
+                        .overlay(Circle().stroke(look.preset == preset && !look.isCustom ? Color.accentColor : Color.secondary.opacity(0.4),
+                                                 lineWidth: look.preset == preset && !look.isCustom ? 2.5 : 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help(preset.title)
+                    .accessibilityLabel(preset.title)
+                }
+                Text(look.isCustom ? "Custom" : look.preset.title).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        HStack {
+            ColorPicker("Fur", selection: mochiColor(\.fur, fallback: look.palette.fur), supportsOpacity: false)
+            ColorPicker("Accent", selection: mochiColor(\.accent, fallback: look.palette.accent), supportsOpacity: false)
+            ColorPicker("Eyes", selection: mochiColor(\.eye, fallback: look.palette.eye), supportsOpacity: false)
+        }
+        Picker("Floppy ear", selection: mochiBinding(\.look.floppyEar)) {
+            ForEach(MochiFloppyEar.allCases) { Text($0.title).tag($0) }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private func swatch(_ hex: String) -> Color { Color(nsColor: NSColor(companionHex: hex) ?? .white) }
+
+    private func mochiColor(_ keyPath: WritableKeyPath<MochiLook, String?>, fallback: String) -> Binding<Color> {
+        Binding(get: { swatch(controller.settings.mochi.look[keyPath: keyPath] ?? fallback) },
+                set: { color in controller.update { $0.mochi.look[keyPath: keyPath] = NSColor(color).companionHex } })
+    }
+
+    /// What Mochi wears in each room, or one choice everywhere.
+    @ViewBuilder
+    private var mochiAccessories: some View {
+        let accessories = settings.mochi.accessories
+        Toggle("Change accessories with the room", isOn: mochiBinding(\.accessories.auto))
+        let rooms: [MochiRoom] = accessories.auto ? MochiRoom.allCases : [.desktop]
+        ForEach(rooms) { room in
+            LabeledContent(accessories.auto ? room.title : "Everywhere") {
+                Menu {
+                    ForEach(MochiAccessory.allCases) { accessory in
+                        Toggle(accessory.title, isOn: Binding(
+                            get: { controller.settings.mochi.accessories.chosen(for: room).contains(accessory) },
+                            set: { _ in controller.update { $0.mochi.accessories.toggle(accessory, in: room) } }))
+                    }
+                    Divider()
+                    Button("Nothing") { controller.update { $0.mochi.accessories.perRoom[room] = [] } }
+                    Button("Default (\(room.defaultAccessories.map(\.title).joined(separator: " + ")))") {
+                        controller.update { $0.mochi.accessories.perRoom[room] = nil }
+                    }
+                } label: {
+                    let chosen = accessories.chosen(for: room)
+                    Text(chosen.isEmpty ? "Nothing" : chosen.map(\.title).joined(separator: " + "))
+                }
+                .fixedSize()
+            }
+        }
+        Text("One or two at a time. With this on, Mochi wears the room's pick in each Space and in Watch mode, and the \"Outside rooms\" pick everywhere else.")
+            .font(.caption).foregroundStyle(.secondary)
     }
 
     private func colorBinding(_ keyPath: WritableKeyPath<CompanionSettings, String>) -> Binding<Color> {

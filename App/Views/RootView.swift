@@ -1,3 +1,4 @@
+import AppKit
 import AtlasCompanionUI
 import AtlasCore
 import AtlasFlow
@@ -89,7 +90,12 @@ struct RootView: View {
                 Text(model.errorMessage ?? "")
             }
             .onReceive(NotificationCenter.default.publisher(for: .orbitOpenHealth)) { _ in model.section = .health }
-            .onAppear { model.openMainWindow = { openWindow(id: "main") } }
+            .background(FollowsActiveDesktop())
+            .onAppear {
+                model.openMainWindow = { openWindow(id: "main") }
+                let app = model   // lives as long as ATLAS does
+                AppDelegate.reopen = { app.bringForward() }
+            }
             .sheet(isPresented: $model.showEventLog) { EventLogView() }
         }
     }
@@ -112,5 +118,22 @@ struct RootView: View {
         .toggleStyle(.switch)
         .controlSize(.small)
         .padding(12)
+    }
+}
+
+/// Makes the main window come to whichever macOS desktop you're on when
+/// ATLAS is activated. Without it, the Companion's overlay (on every
+/// desktop) tells macOS ATLAS already has a window here, so switching to
+/// ATLAS showed only the character while the real window stayed on
+/// another desktop.
+private struct FollowsActiveDesktop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { WindowHook() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    final class WindowHook: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.collectionBehavior.insert(.moveToActiveSpace)
+        }
     }
 }

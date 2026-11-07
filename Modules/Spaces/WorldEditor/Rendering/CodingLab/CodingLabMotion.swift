@@ -1,3 +1,4 @@
+import AtlasSpaces
 import Combine
 import RealityKit
 
@@ -17,9 +18,10 @@ final class CodingLabMotion: RoomMotion {
     /// Seconds between new lines of code.
     static let codeInterval: Double = 3
 
-    let parts: CodingLabParts
+    private(set) var parts: CodingLabParts
     let reduceMotion: Bool
     private var started = false
+    private var lastCoding: CodingRoomState?
     private var boot: Task<Void, Never>?
     private var updates: (any Cancellable)?
     private var sinceLine: Double = 0
@@ -33,6 +35,7 @@ final class CodingLabMotion: RoomMotion {
     func start() {
         guard !started, !reduceMotion else { return }
         started = true
+        defer { if let coding = lastCoding { lastCoding = nil; update(coding) } }
 
         if let spin = parts.hologramSpin {
             let steps = (0..<3).compactMap { step -> AnimationResource? in
@@ -108,6 +111,30 @@ final class CodingLabMotion: RoomMotion {
         boot?.cancel()
         updates?.cancel()
         updates = nil
+        parts.mochi?.stop()
+    }
+
+    // MARK: - Mochi
+
+    /// Mochi on the desk corner: bobbing its head while you're active, the
+    /// loaf during lockdown. Only does work when something changed.
+    func update(_ coding: CodingRoomState) {
+        let previous = lastCoding
+        lastCoding = coding
+        guard previous != coding || parts.mochi == nil && coding.sitter != nil else { return }
+        if previous?.sitter?.lookKey != coding.sitter?.lookKey || parts.mochi == nil {
+            parts.mochi?.stop()
+            parts.mochi?.container.removeFromParent()
+            parts.mochi = nil
+            if let sitter = coding.sitter, let room = parts.room {
+                parts.mochi = CodingLabBuilder.buildSitter(sitter, into: room)
+            }
+        }
+        guard let sitter = coding.sitter, let mochi = parts.mochi else { return }
+        mochi.pose(MochiRoomPose.posture(sitter.activity))
+        guard started else { return }
+        mochi.breathe(period: sitter.isLockdown ? 4 : 3.2)
+        mochi.setBob(sitter.isActive && !sitter.isLockdown)
     }
 
     func setActive(_ isActive: Bool, animated: Bool) {

@@ -100,10 +100,14 @@ public struct CreativeRoomState: Hashable, Sendable {
 
     /// The Companion at its tiny easel.
     public struct Painter: Hashable, Sendable {
-        public enum Style: String, Hashable, Sendable { case robot, creature, orb }
+        public enum Style: String, Hashable, Sendable { case mochi, robot, creature, orb }
         public var style: Style
         public var primary: String
         public var secondary: String
+        /// Mochi's look and what it wears here (beret and paint smudge by
+        /// default; popcorn in Watch mode).
+        public var mochi = MochiLook()
+        public var accessories: [MochiAccessory] = MochiRoom.creativeStudio.defaultAccessories
         /// A creative session: a calm focus look, nothing waiting shown.
         public var isFocused: Bool
         /// Counts exports saved; a change makes it do a small happy bounce.
@@ -122,6 +126,11 @@ public struct CreativeRoomState: Hashable, Sendable {
             self.bounces = bounces
             self.waiting = waiting
             self.detail = detail
+        }
+
+        /// What needs a new figure when it changes.
+        public var lookKey: String {
+            style == .mochi ? "mochi|\(mochi.key)|\(accessories.map(\.rawValue).joined(separator: ","))" : "\(style)|\(primary)|\(secondary)"
         }
     }
 

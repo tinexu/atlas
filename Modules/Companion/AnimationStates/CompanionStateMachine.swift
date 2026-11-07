@@ -193,13 +193,16 @@ public struct CharacterPresentation: Equatable, Sendable {
     public var eyesClosed: Bool
     /// Holding a small open book, head bowed (a study session's focus).
     public var isReading = false
+    /// How Mochi shows this state (the other characters ignore it).
+    public var mochi = MochiPose()
 
     public enum Gesture: Equatable, Sendable { case none, hop, shake, nod }
 
     /// `reading`: a study session's focus phase. Calm and fully visible,
-    /// reading a book, instead of the faded focus look.
+    /// reading a book, instead of the faded focus look. `hover` and
+    /// `petted` only change Mochi (it looks at the cursor; it hops).
     public static func make(for state: CompanionState, intensity: CompanionSettings.Intensity, reduceMotion: Bool,
-                            reading: Bool = false) -> CharacterPresentation {
+                            reading: Bool = false, hover: SIMD2<Float>? = nil, petted: Bool = false) -> CharacterPresentation {
         let accent: String
         switch state {
         case .idle: accent = "#7DD3FC"
@@ -232,6 +235,8 @@ public struct CharacterPresentation: Equatable, Sendable {
             presentation.bobPeriod = 6
             presentation.accent = "#818CF8"
         }
+        presentation.mochi = MochiPose.make(for: state, intensity: intensity, reduceMotion: reduceMotion, reading: reading,
+                                            hover: hover, petted: petted)
         if intensity == .still {
             presentation.rendering = .staticImage
         }

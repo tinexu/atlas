@@ -1,14 +1,17 @@
 import AtlasCore
+import AtlasSpaces
 import Foundation
 
 /// How the Companion looks and behaves. The character's look never changes
 /// what it can do: every option here is cosmetic or a privacy choice.
 public struct CompanionSettings: Codable, Equatable, Sendable {
     public enum Character: String, Codable, CaseIterable, Sendable, Identifiable {
-        case robot, creature, orb, custom
+        // Mochi first: it's the default and leads the picker.
+        case mochi, robot, creature, orb, custom
         public var id: Self { self }
         public var title: String {
             switch self {
+            case .mochi: return "Mochi"
             case .robot: return "Floating Robot"
             case .creature: return "Round Creature"
             case .orb: return "Geometric Orb"
@@ -17,6 +20,7 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
         }
     }
 
+    /// Accessories for the robot, creature and orb (Mochi has its own, `MochiAccessory`).
     public enum Accessory: String, Codable, CaseIterable, Sendable, Identifiable {
         case none, antenna, hat, headphones, glasses
         public var id: Self { self }
@@ -86,7 +90,8 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
         public init() {}
     }
 
-    public var character: Character = .robot
+    public var character: Character = .mochi
+    /// The robot, creature and orb's colours (kept when Mochi is chosen).
     public var primaryColor = "#5B8DEF"
     public var secondaryColor = "#F5F7FA"
     public var accessory: Accessory = .none
@@ -109,9 +114,14 @@ public struct CompanionSettings: Codable, Equatable, Sendable {
     /// Suggestion kinds the person said not to suggest again.
     public var mutedSuggestions: Set<String> = []
     public var favoriteWorkflowIDs: [UUID] = []
-    /// Keep the robot calm while a focus session runs (a Focus Space or a timer named "focus").
+    /// Keep the Companion calm while a focus session runs (a Focus Space or a timer named "focus").
     public var focusSpaceIDs: [UUID] = []
     public var repetitionDetection = true
+    /// Mochi's colours, ear and accessories.
+    public var mochi = MochiSettings()
+    /// Set once the Companion has been switched to Mochi (existing installs
+    /// switch once, on the first launch with Mochi; later choices stick).
+    public var mochiIntroduced = true
 
     public init() {}
 }
@@ -136,6 +146,8 @@ private struct ExtraSettings: Codable {
     var favoriteWorkflowIDs: [UUID]?
     var focusSpaceIDs: [UUID]?
     var repetitionDetection: Bool?
+    var mochi: MochiSettings?
+    var mochiIntroduced: Bool?
 }
 
 extension AtlasEvent.Name {
@@ -159,7 +171,7 @@ extension AtlasStore {
             return CompanionSettings()
         }
         var settings = CompanionSettings()
-        settings.character = row.string("character").flatMap(CompanionSettings.Character.init) ?? .robot
+        settings.character = row.string("character").flatMap(CompanionSettings.Character.init) ?? .mochi
         settings.primaryColor = row.string("primary_color") ?? settings.primaryColor
         settings.secondaryColor = row.string("secondary_color") ?? settings.secondaryColor
         settings.accessory = row.string("accessory").flatMap(CompanionSettings.Accessory.init) ?? .none
@@ -180,6 +192,15 @@ extension AtlasStore {
             settings.favoriteWorkflowIDs = extra.favoriteWorkflowIDs ?? []
             settings.focusSpaceIDs = extra.focusSpaceIDs ?? []
             settings.repetitionDetection = extra.repetitionDetection ?? true
+            settings.mochi = extra.mochi ?? MochiSettings()
+        }
+        let extra = CompanionJSON.decode(ExtraSettings.self, row.string("extra_json"))
+        if extra?.mochiIntroduced != true {
+            // Before Mochi: switch to it once. The robot's colours stay, so
+            // choosing the robot again brings back its old look.
+            settings.character = .mochi
+            settings.mochiIntroduced = true
+            try saveCompanionSettings(settings)
         }
         return settings
     }
@@ -189,7 +210,8 @@ extension AtlasStore {
             companionHotKey: settings.companionHotKey, paletteHotKey: settings.paletteHotKey, cloudModel: settings.cloudModel,
             customCharacterPath: settings.customCharacterPath, suggestionsEnabled: settings.suggestionsEnabled,
             mutedSuggestions: settings.mutedSuggestions, favoriteWorkflowIDs: settings.favoriteWorkflowIDs,
-            focusSpaceIDs: settings.focusSpaceIDs, repetitionDetection: settings.repetitionDetection
+            focusSpaceIDs: settings.focusSpaceIDs, repetitionDetection: settings.repetitionDetection,
+            mochi: settings.mochi, mochiIntroduced: settings.mochiIntroduced
         )
         try database.run(
             """

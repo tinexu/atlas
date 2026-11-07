@@ -37,11 +37,18 @@ Permissions shows Accessibility, Notifications and (for Stage 7) Calendars as gr
 - [ ] Search `ext:pdf size:>1mb` finds files; "Show me what's taking up storage" (Companion) lands on Largest Files.
 
 ## Stage 6 — Companion
-- [ ] The robot sits in a corner, clicks pass through it. Press the Companion shortcut (or ⌘⇧Space): the palette opens with the cursor in it.
-- [ ] Type "open my coding room" → preview "Activate Coding Lab — Deep Work" → Return → the robot animates and the bubble says "Coding Lab ready".
-- [ ] Break a workflow (bad app ID), run it: the robot shows failure and the bubble explains the fix with a "Fix the Step" button.
+- [ ] Mochi sits in a corner, breathing and blinking; clicks pass through it. Press the Companion shortcut (or ⌘⇧Space): the palette opens with the cursor in it.
+- [ ] Type "open my coding room" → preview "Activate Coding Lab — Deep Work" → Return → Mochi perks up its ears while you type, hops while it runs, does a binky with sparkles, and the bubble says "Coding Lab ready".
+- [ ] Break a workflow (bad app ID), run it: Mochi's ears droop, a sweat drop appears, and the bubble explains the fix with a "Fix the Step" button.
 - [ ] Turn AI off (Companion settings) and repeat the commands: they still work.
-- [ ] Drag the robot to another place, restart ATLAS: it comes back there. Unplug the monitor it was on: it moves onto the laptop screen.
+- [ ] Drag Mochi to another place, restart ATLAS: it comes back there. Unplug the monitor it was on: it moves onto the laptop screen.
+
+### Mochi
+- [ ] Existing install: on first launch Mochi replaces the robot. Choose the robot in Companion settings, restart: it stays the robot, in its old colours.
+- [ ] Companion settings: the character tiles preview each character; presets (Strawberry Milk, Matcha, Taro, Mocha, Midnight), custom fur/accent/eye colours, floppy ear left/right/none and per-room accessories change Mochi at once and survive a restart. "Pet Mochi" plays the happy hop.
+- [ ] ⌥Space, then hover: Mochi looks at the cursor and wiggles its nose; click it: a happy hop, then the quick controls.
+- [ ] Animation Reduced (or Reduce Motion on): no hops, bounces or sparkles, only faces and ears change. Still: a still picture.
+- [ ] Activate Coding Lab: Mochi wears headphones (overlay and desk corner) and bobs its head; lockdown → the loaf. Study Library: glasses and scarf, reading in the loaf on the window seat, a page every ~20 s. Creative Studio: beret and paint smudge at the tiny easel, a stroke every ~10 s, a bounce when an export saves. Watch mode: popcorn on the window seat, a bite now and then.
 
 ## Stage 7 — Time Architect
 - [ ] Palette: "I'm going to work on my app for the next two hours" → "Activate Coding Lab — Deep Work and start a 2 h focus block" → Return. Apps open, windows arrange, the block appears on the timeline, the menu bar counts down.
@@ -60,7 +67,7 @@ Permissions shows Accessibility, Notifications and (for Stage 7) Calendars as gr
 - [ ] Quit ATLAS (⌘Q) while a "move file" workflow runs. Relaunch: the file is either moved or untouched, never duplicated; Run History shows the interrupted run as failed.
 - [ ] ~/Library/Application Support/ATLAS/Backups has today's backup; after a week there are 7.
 - [ ] File → Export Data…, then File → Import Data… on the same file: nothing changes, nothing is duplicated.
-- [ ] Activity Monitor with only the menu bar and Companion showing: ATLAS under 1% CPU, Energy Impact "Low". Low Power Mode on → 3D views and the robot stop animating.
+- [ ] Activity Monitor with only the menu bar and Companion showing: ATLAS under 1% CPU, Energy Impact "Low". Low Power Mode on → 3D views and the Companion stop animating. An idle Mochi (breathing, blinking) adds no CPU over the old robot.
 
 ## Found
 <!-- date · what happened · fixed in (commit / test name) -->

@@ -113,6 +113,8 @@ final class AppModel: ObservableObject {
     private var linkObserver: NSObjectProtocol?
     private var folderObserver: NSObjectProtocol?
     private var readerWatch: AnyCancellable?
+    /// Refreshes the Coding Lab's Mochi and the overlay's room (for accessories).
+    private var mochiWatch: Set<AnyCancellable> = []
 
     /// "Add Downloads to Orbit": the folder picker, opened at the folder.
     /// Triggers watching it start, and open editors revalidate.
@@ -314,9 +316,15 @@ final class AppModel: ObservableObject {
             guard let self, self.creative.isWatching, let project = self.creative.currentProject else { return [] }
             return [CompanionHost.MenuItem(title: "Save Video to \(project.name)", symbol: "bookmark") { [weak self] in self?.creative.saveTutorial() }]
         }
+        host.mochiRoom = { [weak self] in
+            guard let self, let core = self.core else { return .desktop }
+            let templateID = (try? core.store.activeSpaceID()).flatMap { $0 }.flatMap { try? core.store.space(id: $0) }?.templateID
+            return MochiRoom.resolve(templateID: templateID, isWatching: self.creative.isWatching)
+        }
         companion.host = host
         companion.start()
         connectReader(companion)
+        connectCodingLab(companion)
     }
 
     /// The Companion reading on the Study Library's window seat: its look,
@@ -325,7 +333,8 @@ final class AppModel: ObservableObject {
         study.readerInfo = { [weak self, weak companion] in
             guard let self, let companion, self.study.settings.companionReads else { return nil }
             let settings = companion.settings
-            let style: StudyRoomState.Reader.Style = settings.character == .creature ? .creature : settings.character == .orb ? .orb : .robot
+            let style: StudyRoomState.Reader.Style = settings.character == .mochi ? .mochi : settings.character == .creature ? .creature
+                : settings.character == .orb ? .orb : .robot
             let waiting = companion.held.count
             let detail: String
             if companion.isStudyFocus {
@@ -334,14 +343,18 @@ final class AppModel: ObservableObject {
             } else {
                 detail = waiting > 0 ? "\(waiting) suggestion\(waiting == 1 ? "" : "s") waiting · click to see" : "Reading · click for anything waiting"
             }
-            return StudyRoomState.Reader(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
-                                         isFocused: companion.isStudyFocus, waiting: waiting, detail: detail)
+            var reader = StudyRoomState.Reader(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
+                                               isFocused: companion.isStudyFocus, waiting: waiting, detail: detail)
+            reader.mochi = settings.mochi.look
+            reader.accessories = settings.mochi.accessories.accessories(for: .studyLibrary)
+            return reader
         }
         study.onReaderClicked = { [weak companion] in companion?.showHeld(sayIfNone: true) }
         creative.painterInfo = { [weak self, weak companion] in
             guard let self, let companion, self.creative.settings.companionPaints else { return nil }
             let settings = companion.settings
-            let style: CreativeRoomState.Painter.Style = settings.character == .creature ? .creature : settings.character == .orb ? .orb : .robot
+            let style: CreativeRoomState.Painter.Style = settings.character == .mochi ? .mochi : settings.character == .creature ? .creature
+                : settings.character == .orb ? .orb : .robot
             let waiting = companion.held.count
             let detail = companion.isCreativeFocus
                 ? (waiting > 0 ? "Painting quietly · \(waiting) thing\(waiting == 1 ? "" : "s") waiting for the end of your session" : "Painting quietly while you create")
@@ -349,16 +362,19 @@ final class AppModel: ObservableObject {
             var painter = CreativeRoomState.Painter(style: style, primary: settings.primaryColor, secondary: settings.secondaryColor,
                                                     isFocused: companion.isCreativeFocus, bounces: self.creative.service?.exportsSaved ?? 0,
                                                     waiting: waiting, detail: detail)
+            painter.mochi = settings.mochi.look
+            painter.accessories = settings.mochi.accessories.accessories(for: .creativeStudio)
             if self.creative.isWatching && self.creative.settings.popcorn {
                 painter.isWatching = true
                 painter.detail = "Watching with you · popcorn"
+                painter.accessories = settings.mochi.accessories.accessories(for: .watch)
             }
             return painter
         }
         creative.onPainterClicked = { [weak companion] in companion?.showHeld(sayIfNone: true) }
         readerWatch = companion.$held.map(\.count).removeDuplicates().combineLatest(
             companion.$isStudyFocus.combineLatest(companion.$isCreativeFocus).map { $0 || $1 }.removeDuplicates(),
-            companion.$settings.map { "\($0.character.rawValue)|\($0.primaryColor)|\($0.secondaryColor)" }.removeDuplicates()
+            companion.$settings.map { "\($0.character.rawValue)|\($0.primaryColor)|\($0.secondaryColor)|\($0.mochi)" }.removeDuplicates()
         )
         .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
         .sink { [weak self] _ in
@@ -369,10 +385,38 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Mochi on the Coding Lab's desk corner, and the overlay's room when
+    /// Watch mode starts or stops (it changes what Mochi wears).
+    private func connectCodingLab(_ companion: CompanionController) {
+        spaces.codingState = { [weak companion] in
+            guard let companion, companion.settings.character == .mochi else { return CodingRoomState() }
+            let settings = companion.settings
+            let lockdown = companion.lockdownEndsAt != nil
+            let sitter = CodingRoomState.Sitter(look: settings.mochi.look, accessories: settings.mochi.accessories.accessories(for: .codingLab),
+                                                isActive: companion.state != .sleeping, isLockdown: lockdown,
+                                                detail: lockdown ? "Locked in with you" : "Listening to music while you code")
+            return CodingRoomState(sitter: sitter)
+        }
+        companion.$state.map { $0 != .sleeping }.removeDuplicates()
+            .combineLatest(companion.$lockdownEndsAt.map { $0 != nil }.removeDuplicates(),
+                           companion.$settings.map { "\($0.character.rawValue)|\($0.mochi)" }.removeDuplicates())
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.spaces.objectWillChange.send() } }
+            .store(in: &mochiWatch)
+        creative.$roomState.map(\.isWatching).removeDuplicates()
+            .sink { [weak companion] _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { companion?.refreshRoom() } }
+            }
+            .store(in: &mochiWatch)
+    }
+
     /// Shows the main window, opening it again if it was closed.
     func bringForward() {
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true && $0.canBecomeMain }) {
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            // On another desktop: bring it here rather than leaving only the Companion showing.
+            window.collectionBehavior.insert(.moveToActiveSpace)
             window.makeKeyAndOrderFront(nil)
         } else {
             openMainWindow?()

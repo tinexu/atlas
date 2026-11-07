@@ -67,6 +67,8 @@ final class SpacesModel: ObservableObject {
     var studyObjectClicked: ((SpaceObject) -> Bool)?
     /// What the Creative Studio room shows (the current project).
     var creativeState: (() -> CreativeRoomState?)?
+    /// What the Coding Lab shows (Mochi on the desk corner).
+    var codingState: (() -> CodingRoomState?)?
     /// Handles a Creative Studio object click; returns whether it did.
     var creativeObjectClicked: ((SpaceObject) -> Bool)?
     /// A Creative Studio object's right-click / long-press (the easel's switcher).
@@ -192,7 +194,8 @@ final class SpacesModel: ObservableObject {
                 status: status(for: space.id),
                 isActive: activeSpaceID == space.id,
                 study: space.templateID == StudyLibrary.templateID ? studyState?() : nil,
-                creative: space.templateID == CreativeLoft.templateID ? creativeState?() : nil
+                creative: space.templateID == CreativeLoft.templateID ? creativeState?() : nil,
+                coding: space.templateID == CodingLab.templateID ? codingState?() : nil
             )
         }
     }

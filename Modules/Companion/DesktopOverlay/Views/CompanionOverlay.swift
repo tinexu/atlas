@@ -157,17 +157,31 @@ struct CompanionOverlayView: View {
 
     var body: some View {
         CharacterView(settings: controller.settings, presentation: controller.presentation, paused: controller.isRenderingPaused,
-                      live: controller.isAnimating)
+                      live: controller.isAnimating, accessories: controller.mochiAccessories,
+                      hover: controller.hover, petted: controller.isPetted)
             .overlay {
                 // Gestures on a clear layer so the 3D view never swallows them.
-                Color.clear
-                    .contentShape(Circle().inset(by: 6))
-                    .gesture(
-                        DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                            .onChanged { _ in overlay.dragChanged() }
-                            .onEnded { _ in if !overlay.dragEnded() { overlay.showMenu() } }
-                    )
-                    .contextMenu { QuickMenuSwiftUI(controller: controller) }
+                GeometryReader { proxy in
+                    Color.clear
+                        .contentShape(Circle().inset(by: 6))
+                        .gesture(
+                            DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                                .onChanged { _ in overlay.dragChanged() }
+                                .onEnded { _ in if !overlay.dragEnded() { clicked() } }
+                        )
+                        .contextMenu { QuickMenuSwiftUI(controller: controller) }
+                        // Only reported while the overlay takes the mouse (interactive).
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                let size = proxy.size
+                                controller.setHover(SIMD2(Float((location.x - size.width / 2) / (size.width / 2)),
+                                                          Float((size.height * 0.45 - location.y) / (size.height / 2))))
+                            case .ended:
+                                controller.setHover(nil)
+                            }
+                        }
+                }
             }
             .overlay(alignment: .bottom) {
                 VStack(spacing: 2) {
@@ -201,6 +215,18 @@ struct CompanionOverlayView: View {
             .accessibilityLabel("ATLAS Companion, \(controller.state.title)")
             .accessibilityAddTraits(.isButton)
             .accessibilityAction { overlay.showMenu() }
+    }
+}
+
+extension CompanionOverlayView {
+    /// Mochi does a happy hop, then the quick controls open.
+    private func clicked() {
+        guard controller.settings.character == .mochi, controller.settings.intensity != .still else {
+            overlay.showMenu()
+            return
+        }
+        controller.pet()
+        DispatchQueue.main.asyncAfter(deadline: .now() + (controller.mochiMoves ? 0.45 : 0.1)) { overlay.showMenu() }
     }
 }
 

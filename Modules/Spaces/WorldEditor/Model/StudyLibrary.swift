@@ -201,10 +201,13 @@ public struct StudyRoomState: Hashable, Sendable {
 
     /// The Companion, reading on the window seat.
     public struct Reader: Hashable, Sendable {
-        public enum Style: String, Hashable, Sendable { case robot, creature, orb }
+        public enum Style: String, Hashable, Sendable { case mochi, robot, creature, orb }
         public var style: Style
         public var primary: String
         public var secondary: String
+        /// Mochi's look and what it wears here (glasses and scarf by default).
+        public var mochi = MochiLook()
+        public var accessories: [MochiAccessory] = MochiRoom.studyLibrary.defaultAccessories
         /// A study session's focus phase: a calm reading pose, nothing waiting shown.
         public var isFocused: Bool
         /// Offers held for the next break.
@@ -219,6 +222,11 @@ public struct StudyRoomState: Hashable, Sendable {
             self.isFocused = isFocused
             self.waiting = waiting
             self.detail = detail
+        }
+
+        /// Mochi's look and accessories, for deciding when to rebuild it.
+        public var lookKey: String {
+            style == .mochi ? "\(mochi.key)|\(accessories.map(\.rawValue).joined(separator: ","))" : ""
         }
     }
 
@@ -294,7 +302,7 @@ public struct StudyRoomState: Hashable, Sendable {
     public var geometry: [String] {
         books.map { "\($0.id)|\($0.code)|\($0.color)" }
             + shelf.map { "shelf|\($0.term)|\($0.colors.joined(separator: ","))" }
-            + [reader.map { "reader|\($0.style.rawValue)|\($0.primary)|\($0.secondary)" } ?? "reader|none"]
+            + [reader.map { "reader|\($0.style.rawValue)|\($0.primary)|\($0.secondary)|\($0.lookKey)" } ?? "reader|none"]
     }
 
     /// What hovering a room item shows.

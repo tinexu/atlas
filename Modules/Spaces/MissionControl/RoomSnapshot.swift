@@ -13,11 +13,13 @@ public struct RoomSnapshot: Identifiable, Hashable {
     public var study: StudyRoomState?
     /// The Creative Studio's current project and more (updated in place).
     public var creative: CreativeRoomState?
+    /// The Coding Lab's Mochi (updated in place).
+    public var coding: CodingRoomState?
 
     public var id: UUID { space.id }
 
     public init(space: Space, room: RoomLayout, objects: [SpaceObject], status: SpaceStatus, isActive: Bool,
-                study: StudyRoomState? = nil, creative: CreativeRoomState? = nil) {
+                study: StudyRoomState? = nil, creative: CreativeRoomState? = nil, coding: CodingRoomState? = nil) {
         self.space = space
         self.room = room
         self.objects = objects
@@ -25,6 +27,7 @@ public struct RoomSnapshot: Identifiable, Hashable {
         self.isActive = isActive
         self.study = study
         self.creative = creative
+        self.coding = coding
     }
 
     /// What requires rebuilding the room's meshes when it changes. Status,

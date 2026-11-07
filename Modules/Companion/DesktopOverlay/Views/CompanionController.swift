@@ -31,6 +31,8 @@ public struct CompanionHost {
     public var holdsSuggestionsWhileCreating: () -> Bool = { true }
     /// Items at the top of the quick menu right now (e.g. "Save Video to Robot").
     public var extraMenuItems: () -> [MenuItem] = { [] }
+    /// Which room Mochi is in (the active Space, or Watch mode), for its accessories.
+    public var mochiRoom: () -> MochiRoom = { .desktop }
 
     public struct MenuItem {
         public let title: String
@@ -86,6 +88,13 @@ public final class CompanionController: ObservableObject {
     @Published public private(set) var held: [Suggestion] = []
     /// A creative session is running: quiet, but no reading pose.
     @Published public private(set) var isCreativeFocus = false
+    /// Where Mochi is, for what it wears (refreshed when a Space or Watch mode changes).
+    @Published public private(set) var mochiRoom: MochiRoom = .desktop
+    /// The cursor over the interactive overlay, -1…1 from its centre (y up).
+    @Published public private(set) var hover: SIMD2<Float>?
+    /// A click or "Pet Mochi": one happy hop.
+    @Published public private(set) var isPetted = false
+    private var petWork: DispatchWorkItem?
     private var hold = StudyHold() {
         didSet { held = hold.held }
     }
@@ -145,6 +154,7 @@ public final class CompanionController: ObservableObject {
             await self?.received(apps)
         }
         updateFocus()
+        refreshRoom()
         overlay.apply(settings)
         Task { await refreshAIStatus() }
     }
@@ -191,12 +201,47 @@ public final class CompanionController: ObservableObject {
 
     // MARK: - Presentation
 
-    /// Idle, focus and sleep show a rendered still, so an idle Companion uses almost no CPU.
+    /// Idle, focus and sleep show a rendered still, so an idle Companion
+    /// uses almost no CPU. Hovering and clicking never switch to the live
+    /// 3D view: swapping views under the cursor made Mochi flicker out.
+    /// Mochi's picture leans towards the cursor and hops instead.
     var isAnimating: Bool { state.usesLiveRendering }
 
     var presentation: CharacterPresentation {
         CharacterPresentation.make(for: state, intensity: settings.intensity,
                                    reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, reading: isStudyFocus)
+    }
+
+    /// Whether Mochi may hop and lean (full animation, Reduce Motion off).
+    var mochiMoves: Bool {
+        settings.intensity == .full && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// What Mochi wears right now.
+    public var mochiAccessories: [MochiAccessory] { settings.mochi.accessories.accessories(for: mochiRoom) }
+
+    /// One happy hop (a click on the character, or "Pet Mochi" in settings).
+    public func pet() {
+        petWork?.cancel()
+        isPetted = true
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.isPetted = false }
+        }
+        petWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: work)
+    }
+
+    /// The cursor moved over the character (nil: it left). Rounded so small
+    /// moves don't redraw.
+    func setHover(_ point: SIMD2<Float>?) {
+        let rounded = point.map { SIMD2(($0.x * 8).rounded() / 8, ($0.y * 8).rounded() / 8) }
+        if rounded != hover { hover = rounded }
+    }
+
+    /// Asks the app where Mochi is (the active Space, or Watch mode).
+    public func refreshRoom() {
+        let room = host.mochiRoom()
+        if room != mochiRoom { mochiRoom = room }
     }
 
     private func feed(_ input: CompanionStateMachine.Input) {
@@ -255,8 +300,12 @@ public final class CompanionController: ObservableObject {
             setStudyFocus(false)
         case AtlasEvent.Name.creativeSessionChanged:
             setCreativeFocus(!(event.payload["sessionId"]?.stringValue ?? "").isEmpty)
+            refreshRoom()
         case AtlasEvent.Name.creativeSessionEnded:
             setCreativeFocus(false)
+            refreshRoom()
+        case AtlasEvent.Name.spaceDeactivatedEvent:
+            refreshRoom()
         case _ where event.name.hasPrefix("lockdown."):
             lockdownEndsAt = core.time?.lockdown.session?.endsAt
         case _ where event.name.hasPrefix("focus."):
@@ -269,6 +318,7 @@ public final class CompanionController: ObservableObject {
             }
         case AtlasEvent.Name.timerStarted, AtlasEvent.Name.timerCompleted, AtlasEvent.Name.timerStopped, AtlasEvent.Name.spaceActivatedEvent:
             updateFocus()
+            if event.name == AtlasEvent.Name.spaceActivatedEvent { refreshRoom() }
             if event.name == AtlasEvent.Name.timerCompleted, let name = event.payload["name"]?.stringValue {
                 showBubble(StatusBubble(text: "“\(name)” timer is done", isFailure: false), seconds: 8)
             }

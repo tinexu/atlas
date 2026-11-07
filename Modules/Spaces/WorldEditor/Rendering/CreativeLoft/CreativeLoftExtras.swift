@@ -292,6 +292,10 @@ extension CreativeLoftBuilder {
         /// Watching: on the window seat, turned towards the TV.
         static let seat = SIMD3<Float>(0.75, 0.52, -1.2)
         static let seatYaw: Float = -0.9
+        /// Mochi's height, soles to the top of its head (ears extra).
+        static let mochiHeight: Float = 0.24
+        /// Extra turn towards the easel for Mochi (it faces +z; the robot's arm reaches sideways).
+        static let mochiEaselTurn: Float = 0.6
     }
 
     struct PainterParts {
@@ -303,6 +307,8 @@ extension CreativeLoftBuilder {
         /// The tiny easel (hidden while watching) and the popcorn bowl (shown).
         let easel: Entity
         let popcorn: Entity
+        /// Mochi, when it's the painter (its brush paw is `arm`).
+        var mochi: MochiRoomFigure?
     }
 
     /// A small Companion in your colours at a tiny easel, holding a brush.
@@ -337,7 +343,12 @@ extension CreativeLoftBuilder {
         let shape = Batches<LoftMaterial>(m)
         var eyes: [(SIMD3<Float>, Float)] = []
         var top: Float
+        if painter.style == .mochi {
+            return buildMochiPainter(painter, container: container, body: body, easel: easelEntity, into: loft)
+        }
         switch painter.style {
+        case .mochi:
+            top = 0
         case .robot:
             shape.add(secondary, rbox(0.13, 0.14, 0.1, 0.03), at: [0, 0.1, 0])
             shape.add(primary, rbox(0.17, 0.13, 0.13, 0.035), at: [0, 0.25, 0])
@@ -398,6 +409,43 @@ extension CreativeLoftBuilder {
         loft.addChild(container)
         RoomBuilder.makeInteractive(container)
         return PainterParts(container: container, body: body, arm: arm, eyes: eyeEntities, dot: dot, easel: easelEntity, popcorn: popcorn)
+    }
+
+    /// Mochi at the easel in its beret, a little brush in its right paw;
+    /// in Watch mode it wears the popcorn box instead (see `accessories`).
+    private static func buildMochiPainter(_ painter: CreativeRoomState.Painter, container: Entity, body: Entity, easel: Entity,
+                                          into loft: Entity) -> PainterParts {
+        let mochi = MochiRoomFigure(look: painter.mochi, accessories: painter.accessories, height: Painter.mochiHeight)
+        mochi.pose(MochiRoomPose.posture(painter.isWatching ? .watching : .painting, focused: painter.isFocused))
+        body.addChild(mochi.container)
+        // The brush, in Mochi's units, poking forward from the paw towards the canvas.
+        let arm = mochi.figure[.pawRight] ?? Entity()
+        let brush = Entity()
+        brush.name = "brush"
+        brush.addChild(ModelEntity(mesh: .generateCylinder(height: 0.42, radius: 0.014),
+                                   materials: [SimpleMaterial(color: NSColor(atlasHex: "#B07B4F"), roughness: 0.7, isMetallic: false)]))
+        let tip = ModelEntity(mesh: .generateSphere(radius: 0.03),
+                              materials: [SimpleMaterial(color: NSColor(atlasHex: CreativeLoftPalette.current.berry), roughness: 0.6, isMetallic: false)])
+        tip.position = [0, 0.22, 0]
+        brush.addChild(tip)
+        brush.position = [0, -0.13, 0.06]
+        brush.orientation = simd_quatf(angle: 1.2, axis: [1, 0, 0])
+        brush.isEnabled = !painter.isWatching
+        arm.addChild(brush)
+        let dot = ModelEntity(mesh: .generateSphere(radius: 0.008), materials: [CreativeLoftMaterials.glow("#F2A03D", intensity: 0.6)])
+        dot.position = [0.07, Painter.mochiHeight * 1.25, 0]
+        dot.isEnabled = painter.waiting > 0 && !painter.isFocused
+        body.addChild(dot)
+        // Watch mode's popcorn is Mochi's own accessory; this stays empty.
+        let popcorn = Entity()
+        popcorn.isEnabled = false
+        body.addChild(popcorn)
+        container.addChild(body)
+        loft.addChild(container)
+        RoomBuilder.makeInteractive(container)
+        var parts = PainterParts(container: container, body: body, arm: arm, eyes: [], dot: dot, easel: easel, popcorn: popcorn)
+        parts.mochi = mochi
+        return parts
     }
 }
 

@@ -43,6 +43,42 @@ public enum CodingLabRole: String, DioramaRole {
     static let withDefaults: [CodingLabRole] = [.ultrawide, .portrait, .keyboard, .hologram, .serverRack, .kanban, .mug]
 }
 
+/// What the Coding Lab shows beyond its props: Mochi on the desk corner.
+public struct CodingRoomState: Hashable, Sendable {
+    /// Mochi next to the keyboard, headphones on.
+    public struct Sitter: Hashable, Sendable {
+        public var look: MochiLook
+        public var accessories: [MochiAccessory]
+        /// You're at the Mac: it bobs its head slowly, as if to music.
+        public var isActive: Bool
+        /// Lockdown is on: it settles into the loaf.
+        public var isLockdown: Bool
+        public var detail: String
+
+        public init(look: MochiLook = MochiLook(), accessories: [MochiAccessory] = MochiRoom.codingLab.defaultAccessories,
+                    isActive: Bool = true, isLockdown: Bool = false, detail: String = "") {
+            self.look = look
+            self.accessories = accessories
+            self.isActive = isActive
+            self.isLockdown = isLockdown
+            self.detail = detail
+        }
+
+        public var lookKey: String { "\(look.key)|\(accessories.map(\.rawValue).joined(separator: ","))" }
+
+        public var activity: MochiRoomPose.Activity { isLockdown ? .lockdown : .coding }
+    }
+
+    /// Nil: no Mochi (the Companion is another character, or hidden).
+    public var sitter: Sitter?
+
+    public init(sitter: Sitter? = nil) {
+        self.sitter = sitter
+    }
+
+    public static let sitterEntityName = "codingitem:mochi"
+}
+
 public enum CodingLab {
     public static let templateID = "coding-lab"
     public static let cursorBundleID = "com.todesktop.230313mzl4w4u92"

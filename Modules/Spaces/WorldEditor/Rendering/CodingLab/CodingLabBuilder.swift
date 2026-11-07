@@ -36,6 +36,7 @@ enum CodingLabBuilder {
         room.scale = SIMD3(repeating: scale)
         room.position = offset
         var parts = CodingLabParts(palette: palette)
+        if detail { parts.room = room }
 
         let shell = B(m)
         buildShell(shell, detail: detail)
@@ -744,4 +745,28 @@ struct CodingLabParts {
     var cityFlicker: [Entity] = []
     var steam: [Entity] = []
     var monitorGlow: PointLight?
+    /// Where Mochi sits (full room only), and Mochi once it's there.
+    weak var room: Entity?
+    var mochi: MochiRoomFigure?
+}
+
+extension CodingLabBuilder {
+    /// Mochi on the front corner of the desk, between the keyboard and
+    /// the mug, turned a little towards the keyboard.
+    enum Sitter {
+        static let position = SIMD3<Float>(-0.4, deskTop, -0.72)
+        static let yaw: Float = -0.3
+        /// Mochi's height in metres, soles to the top of its head (ears extra).
+        static let height: Float = 0.12
+    }
+
+    static func buildSitter(_ sitter: CodingRoomState.Sitter, into room: Entity) -> MochiRoomFigure {
+        let mochi = MochiRoomFigure(look: sitter.look, accessories: sitter.accessories, height: Sitter.height)
+        mochi.container.name = CodingRoomState.sitterEntityName
+        mochi.container.position = Sitter.position
+        mochi.container.orientation = simd_quatf(angle: Sitter.yaw, axis: [0, 1, 0])
+        mochi.pose(MochiRoomPose.posture(sitter.activity))
+        room.addChild(mochi.container)
+        return mochi
+    }
 }

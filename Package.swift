@@ -94,7 +94,8 @@ let package = Package(
         // Companion settings screen.
         .target(
             name: "AtlasCompanionUI",
-            dependencies: ["AtlasCompanion"],
+            // AtlasSpacesUI for `MochiFigure`, shared with the rooms.
+            dependencies: ["AtlasCompanion", "AtlasSpacesUI"],
             path: "Modules/Companion",
             exclude: ["AnimationStates", "IntentParser", "ContextualSuggestions", "CommandInterface/Model", "DesktopOverlay/Model",
                       "CharacterRenderer/Model"],

@@ -43,6 +43,7 @@ final class StudyLibraryMotion: RoomMotion {
         }
         animateSnow()
         turnReaderPages()
+        parts.readerFigure?.breathe(period: 3.5)
         for (index, puff) in parts.steam.enumerated() {
             let duration = 2.6 + Double(index) * 0.4
             var high = puff.transform
@@ -70,6 +71,7 @@ final class StudyLibraryMotion: RoomMotion {
 
     func stop() {
         fade?.cancel()
+        parts.readerFigure?.stop()
     }
 
     /// Slow falling snow, with a little sideways drift.
@@ -183,6 +185,8 @@ final class StudyLibraryMotion: RoomMotion {
     /// usual colour, with a small warm light when suggestions are waiting.
     private func applyReader(_ reader: StudyRoomState.Reader) {
         typealias R = StudyLibraryBuilder.Reader
+        // Mochi: eyes on the page, half-closed and calm in a study focus.
+        parts.readerFigure?.pose(MochiRoomPose.posture(.reading, focused: reader.isFocused))
         for eye in parts.readerAccents {
             eye.model?.materials = [StudyLibraryMaterials.emissive(reader.isFocused ? R.focusAccent : R.idleAccent, intensity: 1.2)]
         }

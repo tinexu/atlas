@@ -110,6 +110,9 @@ final class MissionControlScene {
             if let creative = snapshot.creative, let motion = entity.components[RoomMotionComponent.self]?.motion as? CreativeLoftMotion {
                 motion.update(creative)
             }
+            if let coding = snapshot.coding, let motion = entity.components[RoomMotionComponent.self]?.motion as? CodingLabMotion {
+                motion.update(coding)
+            }
             if snapshot.isActive != activeRooms.contains(snapshot.id) {
                 // Only a change animates, not a room that was already active.
                 entity.components[RoomMotionComponent.self]?.motion.setActive(snapshot.isActive, animated: hasFramedWorld)

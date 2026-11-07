@@ -1086,6 +1086,8 @@ struct StudyLibraryParts {
     var readerPage: Entity?
     var readerAccents: [ModelEntity] = []
     var readerDot: ModelEntity?
+    /// Mochi, when it's the reader.
+    var readerFigure: MochiRoomFigure?
     var steam: [Entity] = []
     /// Course books by course, for the slide-onto-the-shelf animation.
     var courseBooks: [UUID: Entity] = [:]

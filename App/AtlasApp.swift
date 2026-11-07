@@ -140,6 +140,9 @@ struct SpacesCommands: Commands {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Brings the main window back (set once the app model exists).
+    @MainActor static var reopen: (() -> Void)?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched with `swift run`, which starts as a
         // background process with no Dock icon or focus.
@@ -152,5 +155,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// triggers and runs keep working.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Clicking the Dock icon (or opening ATLAS again) always shows the
+    /// main window. AppKit's default only reopens it when no window is
+    /// visible, and the Companion's overlay counts as one, so the click
+    /// would bring up just the character.
+    @MainActor
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        guard let reopen = Self.reopen else { return true }
+        reopen()
+        return false
     }
 }

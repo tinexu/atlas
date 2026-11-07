@@ -241,8 +241,11 @@ final class CreativeLoftMotion: RoomMotion {
 
     private func applyPainter(_ painter: CreativeRoomState.Painter?, previous: CreativeRoomState.Painter?) {
         typealias P = CreativeLoftBuilder.Painter
-        let look: (CreativeRoomState.Painter?) -> String = { $0.map { "\($0.style)|\($0.primary)|\($0.secondary)" } ?? "" }
+        let look: (CreativeRoomState.Painter?) -> String = { $0?.lookKey ?? "" }
+        var rebuilt = false
         if look(painter) != look(previous) || (painter != nil && parts.painter == nil) {
+            rebuilt = true
+            parts.painter?.mochi?.stop()
             parts.painter?.container.removeFromParent()
             parts.painter = nil
             if let painter, let room = parts.room, let m = parts.materials {
@@ -251,14 +254,33 @@ final class CreativeLoftMotion: RoomMotion {
             }
         }
         guard let painter, let figure = parts.painter else { return }
-        if painter.isWatching != (previous?.isWatching ?? false) || figure.popcorn.isEnabled != painter.isWatching {
+        if painter.isWatching != (previous?.isWatching ?? false) || figure.popcorn.isEnabled != painter.isWatching
+            || rebuilt && figure.mochi != nil {
             // Watching: onto the window seat with popcorn; otherwise back at the easel.
             figure.body.position = painter.isWatching ? P.seat : P.base
             figure.body.orientation = simd_quatf(angle: painter.isWatching ? P.seatYaw : P.figureYaw, axis: [0, 1, 0])
             figure.easel.isEnabled = !painter.isWatching
-            figure.arm.isEnabled = !painter.isWatching
-            figure.popcorn.isEnabled = painter.isWatching
-            figure.arm.stopAllAnimations()
+            if let mochi = figure.mochi {
+                // The paw stays; only the brush goes while it watches.
+                figure.arm.findEntity(named: "brush")?.isEnabled = !painter.isWatching
+                figure.popcorn.isEnabled = false
+                figure.arm.stopAllAnimations()
+                let base = MochiRoomPose.posture(painter.isWatching ? .watching : .painting, focused: painter.isFocused)
+                mochi.pose(base)
+                // Turned a little more towards the canvas while painting.
+                mochi.container.orientation = simd_quatf(angle: painter.isWatching ? 0 : P.mochiEaselTurn, axis: [0, 1, 0])
+                if !reduceMotion {
+                    mochi.breathe(period: 3.2)
+                    mochi.setEating(painter.isWatching, base: base)
+                }
+            } else {
+                figure.arm.isEnabled = !painter.isWatching
+                figure.popcorn.isEnabled = painter.isWatching
+                figure.arm.stopAllAnimations()
+            }
+            if !painter.isWatching { paint() }
+        } else if let mochi = figure.mochi, previous?.isFocused != painter.isFocused {
+            mochi.pose(MochiRoomPose.posture(painter.isWatching ? .watching : .painting, focused: painter.isFocused))
             if !painter.isWatching { paint() }
         }
         let accent = CreativeLoftMaterials.glow(painter.isFocused ? P.focusAccent : P.idleAccent, intensity: 1.2)
@@ -272,7 +294,8 @@ final class CreativeLoftMotion: RoomMotion {
         guard started, let arm = parts.painter?.arm else { return }
         let rest = arm.transform
         var reach = rest
-        reach.rotation = simd_quatf(angle: -0.45, axis: [1, 0, 0]) * simd_quatf(angle: 0.25, axis: [0, 0, 1])
+        // Relative to the arm's rest (the robot's is level; Mochi's paw points forward).
+        reach.rotation = rest.rotation * simd_quatf(angle: -0.45, axis: [1, 0, 0]) * simd_quatf(angle: 0.25, axis: [0, 0, 1])
         let steps = [
             FromToByAnimation<Transform>(from: rest, to: rest, duration: 8.6, bindTarget: .transform),
             FromToByAnimation<Transform>(from: rest, to: reach, duration: 0.7, timing: .easeInOut, bindTarget: .transform),
@@ -329,6 +352,7 @@ final class CreativeLoftMotion: RoomMotion {
 
     func stop() {
         celebration?.cancel()
+        parts.painter?.mochi?.stop()
     }
 
     func setActive(_ isActive: Bool, animated: Bool) {

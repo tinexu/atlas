@@ -376,10 +376,15 @@ extension StudyLibraryBuilder {
         static let bookTilt: Float = -0.75
         static let focusAccent = "#818CF8"
         static let idleAccent = "#7DD3FC"
+        /// Mochi's height, soles to the top of its head (ears extra).
+        static let mochiHeight: Float = 0.22
+        /// Mochi's book, held low in both paws.
+        static let mochiBook = SIMD3<Float>(0, 0.06, 0.085)
     }
 
-    /// A small Companion in your colours (robot, creature or orb) holding
-    /// an open book whose page the motion turns every ~20 s.
+    /// A small Companion holding an open book whose page the motion turns
+    /// every ~20 s: Mochi in the loaf pose with its glasses and scarf, or
+    /// the robot, creature or orb in your colours.
     static func buildReader(_ reader: StudyRoomState.Reader, _ m: StudyLibraryMaterials, into room: Entity,
                             parts: inout StudyLibraryParts) {
         let container = Entity()
@@ -390,7 +395,16 @@ extension StudyLibraryBuilder {
         let body = B(m)
         var accents: [(SIMD3<Float>, Float)] = []
         var headTop: Float
+        var bookScale: Float = 1
         switch reader.style {
+        case .mochi:
+            let mochi = MochiRoomFigure(look: reader.mochi, accessories: reader.accessories, height: Reader.mochiHeight)
+            mochi.pose(MochiRoomPose.posture(.reading, focused: reader.isFocused))
+            mochi.container.position = [0, 0.01, -0.01]
+            container.addChild(mochi.container)
+            parts.readerFigure = mochi
+            headTop = Reader.mochiHeight * 1.2
+            bookScale = 0.62
         case .robot:
             body.add(secondary, rbox(0.13, 0.11, 0.1, 0.03), at: [0, 0.06, 0])
             let tilt = simd_quatf(angle: 0.28, axis: [1, 0, 0])
@@ -431,8 +445,9 @@ extension StudyLibraryBuilder {
 
         // The open book, tilted up towards its face.
         let book = Entity()
-        book.position = Reader.book
+        book.position = reader.style == .mochi ? Reader.mochiBook : Reader.book
         book.orientation = simd_quatf(angle: Reader.bookTilt, axis: [1, 0, 0])
+        book.scale = SIMD3(repeating: bookScale)
         let pages = B(m)
         pages.add(.paint(m.palette.burgundy), rbox(0.15, 0.006, 0.1, 0.002), at: [0, -0.004, 0])
         pages.add(.paper, box(0.07, 0.01, 0.094), at: [-0.037, 0.004, 0])
