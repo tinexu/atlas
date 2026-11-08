@@ -35,6 +35,8 @@ final class StudyTasksModel: ObservableObject {
     /// Rows striking through before they slide to "Done".
     @Published private(set) var striking: Set<UUID> = []
     @Published private(set) var hotKeyProblem: String?
+    /// The task whose title is being edited in place (one at a time).
+    @Published var editingID: UUID?
 
     private var panel: NSPanel?
     private var quickAdd: QuickAddPanel?
@@ -168,7 +170,14 @@ final class StudyTasksModel: ObservableObject {
     func uncheck(_ id: UUID) { tasks?.uncheck(id); reload() }
     func pin(_ id: UUID) { tasks?.pin(id); reload() }
     func delete(_ id: UUID) { tasks?.delete(id); reload() }
-    func edit(_ id: UUID, title: String) { tasks?.edit(id, title: title); reload() }
+    /// Saves an edited title ("x3" and "#course" work here too). An empty
+    /// title leaves the task as it was.
+    func edit(_ id: UUID, title: String) {
+        if editingID == id { editingID = nil }
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        tasks?.edit(id, title: title)
+        reload()
+    }
     func setEstimate(_ id: UUID, _ estimate: Int?) { tasks?.setEstimate(id, estimate); reload() }
     func setLink(_ id: UUID, _ link: SessionTask.Link?) { tasks?.setLink(id, link); reload() }
 

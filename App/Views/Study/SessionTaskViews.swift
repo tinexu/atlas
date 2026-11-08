@@ -282,12 +282,18 @@ struct TaskListView: View {
                     .scrollContentBackground(.hidden)
                     .frame(maxHeight: .infinity)
                     .onKeyPress(.space) {
-                        guard let selection, !fieldFocused else { return .ignored }
+                        guard let selection, !fieldFocused, model.editingID == nil else { return .ignored }
                         toggle(selection)
                         return .handled
                     }
+                    .onKeyPress(.return) {
+                        guard let selection, !fieldFocused, model.editingID == nil,
+                              model.list.open.contains(where: { $0.id == selection }) else { return .ignored }
+                        model.editingID = selection
+                        return .handled
+                    }
                     .onDeleteCommand {
-                        if let selection { model.delete(selection) }
+                        if let selection, model.editingID == nil { model.delete(selection) }
                     }
                     // A new task scrolls into view.
                     .onChange(of: open.last?.id) { _, id in
@@ -311,8 +317,21 @@ struct TaskRow: View {
     @EnvironmentObject private var model: StudyTasksModel
     let task: SessionTask
     let isCurrent: Bool
-    @State private var editing = false
     @State private var text = ""
+    @State private var hovering = false
+    @FocusState private var titleFocused: Bool
+
+    private var editing: Bool { model.editingID == task.id }
+
+    private func startEditing() {
+        guard !task.done else { return }
+        model.editingID = task.id
+    }
+
+    private func commit() {
+        guard editing else { return }
+        if text != task.title { model.edit(task.id, title: text) } else { model.editingID = nil }
+    }
 
     var body: some View {
         let striking = model.striking.contains(task.id)
@@ -333,18 +352,24 @@ struct TaskRow: View {
                 if editing {
                     TextField("Task", text: $text)
                         .textFieldStyle(.plain)
-                        .onSubmit { model.edit(task.id, title: text); editing = false }
-                        .onExitCommand { editing = false }
+                        .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
+                        .focused($titleFocused)
+                        .onSubmit { commit() }
+                        .onExitCommand { model.editingID = nil }
+                        .onChange(of: titleFocused) { _, focused in if !focused && editing { commit() } }
+                        .onAppear {
+                            text = task.title
+                            DispatchQueue.main.async { titleFocused = true }
+                        }
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(.background))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.accentColor.opacity(0.6), lineWidth: 1))
                 } else {
                     Text(task.title)
                         .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
                         .strikethrough(checked, color: .secondary)
                         .foregroundStyle(checked ? .secondary : .primary)
                         .lineLimit(2)
-                        .onTapGesture(count: 2) {
-                            text = task.title
-                            editing = true
-                        }
                 }
                 let meta = metaParts
                 if isCurrent || !meta.isEmpty {
@@ -369,6 +394,15 @@ struct TaskRow: View {
                 }
             }
             Spacer(minLength: 4)
+            if hovering && !editing && !task.done {
+                Button(action: startEditing) {
+                    Image(systemName: "pencil").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Edit task (or double-click, or press Return)")
+                .accessibilityLabel("Edit \(task.title)")
+            }
             TomatoDots(estimate: task.estimatedPomodoros, actual: task.actualPomodoros)
         }
         .padding(.vertical, 7)
@@ -384,6 +418,9 @@ struct TaskRow: View {
         }
         .opacity(task.done ? 0.7 : 1)
         .animation(.easeOut(duration: 0.3), value: checked)
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { startEditing() })
         .contextMenu {
             Menu("Estimate") {
                 Button("None") { model.setEstimate(task.id, nil) }
@@ -396,7 +433,7 @@ struct TaskRow: View {
             if !task.done {
                 Button(task.pinned ? "Unpin" : "Make Current") { model.pin(task.id) }
             }
-            Button("Edit") { text = task.title; editing = true }
+            if !task.done { Button("Edit") { startEditing() } }
             Divider()
             Button("Delete", role: .destructive) { model.delete(task.id) }
         }
