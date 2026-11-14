@@ -442,6 +442,9 @@ public struct WorkflowGenerator: Sendable {
     public static func templates(context: GenerationContext) -> [(title: String, blueprint: WorkflowBlueprint)] {
         let space = context.spaces.first ?? "Coding Lab"
         let folder = context.folders.first ?? "~/Downloads"
+        // PDFs go to Documents/PDFs when Documents is an Orbit folder, else into the watched folder.
+        let documents = context.folders.contains { ($0 as NSString).expandingTildeInPath == ("~/Documents" as NSString).expandingTildeInPath }
+        let pdfs = documents ? "~/Documents/PDFs" : (folder as NSString).appendingPathComponent("PDFs")
         let workflow = context.workflows.first?.name
         return [
             ("When an app launches → activate a Space", WorkflowBlueprint(
@@ -450,10 +453,10 @@ public struct WorkflowGenerator: Sendable {
                 trigger: .init(type: TriggerCatalog.appLaunched, parameters: [.init("app", context.apps.first?.id ?? "com.apple.Safari")]),
                 steps: [.init(action: "space.activate", parameters: [.init("space", space)])])),
             ("When a file arrives → move it", WorkflowBlueprint(
-                name: "Sort new files in \((folder as NSString).lastPathComponent)", summary: "When a PDF appears in \(folder), move it into a PDFs folder there.",
+                name: "Sort new files in \((folder as NSString).lastPathComponent)", summary: "When a PDF appears in \(folder), move it into \(documents ? "a PDFs folder in Documents" : "a PDFs folder there").",
                 assumptions: ["Change the extension and the destination to suit you."],
                 trigger: .init(type: TriggerCatalog.fileCreated, parameters: [.init("folder", folder), .init("extensions", "pdf")]),
-                steps: [.init(action: "file.move", parameters: [.init("path", "{{trigger.path}}"), .init("destination", (folder as NSString).appendingPathComponent("PDFs"))])])),
+                steps: [.init(action: "file.move", parameters: [.init("path", "{{trigger.path}}"), .init("destination", pdfs)])])),
             ("Every weekday at 9 → run", WorkflowBlueprint(
                 name: "Weekday mornings", summary: "Every weekday at 09:00, \(workflow.map { "run \($0)" } ?? "show a notification").",
                 trigger: .init(type: TriggerCatalog.timeReached, parameters: [.init("repeat", "weekly"), .init("time", "09:00"), .init("days", "mon, tue, wed, thu, fri")]),

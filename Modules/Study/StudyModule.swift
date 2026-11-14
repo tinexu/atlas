@@ -12,9 +12,12 @@ public final class StudyModule: @unchecked Sendable {
     public let automations: StudyAutomations
     public let weather: WeatherService
     private let actionContext = StudyActionContext()
+    private let core: AtlasCore
+    private var lockSubscription: EventBus.Subscription?
 
     public init(core: AtlasCore, reminders: ReminderStore = EventKitReminderStore(),
                 weatherFetcher: WeatherFetching = URLSessionWeatherFetcher()) throws {
+        self.core = core
         service = StudyService(core: core)
         weather = WeatherService(store: core.store, fetcher: weatherFetcher)
         sessions = StudySessions(core: core, courses: service)
@@ -24,6 +27,14 @@ public final class StudyModule: @unchecked Sendable {
         tasks.sessions = sessions
         sessions.tasks = tasks
         sessions.restore()
+        // The window lock rides along with the session: breaks may let you
+        // out, and it ends when the session does.
+        sessions.onBreakChanged = { [weak core] onBreak in core?.time?.windowLock.setOnBreak(onBreak) }
+        lockSubscription = core.events.subscribe(AtlasEvent.Name.studySessionEnded) { [weak core] _ in
+            Task { await core?.time?.windowLock.end() }
+        }
+        let running = sessions.current?.id
+        Task { [weak core] in await core?.time?.windowLock.resume(ownerID: running) }
         if core.registry.descriptor(for: AddSessionTaskAction.id) == nil {
             try core.registry.register(AddSessionTaskAction(tasks: tasks))
         }
@@ -48,6 +59,22 @@ public final class StudyModule: @unchecked Sendable {
         if core.registry.descriptor(for: OpenCourseAction.id) == nil {
             try core.registry.register(OpenCourseAction(service: service))
         }
+    }
+
+    deinit {
+        if let lockSubscription { core.events.unsubscribe(lockSubscription) }
+    }
+
+    // MARK: - Window lock
+
+    /// Locks you in to `windows` for the running session (remembered for next time).
+    @discardableResult
+    public func lockIn(_ windows: [LockedWindow]) async -> WindowLockSession? {
+        guard !windows.isEmpty, let session = sessions.current, let windowLock = core.time?.windowLock else { return nil }
+        var settings = service.settings
+        settings.windowLock.lastWindows = windows
+        service.settings = settings
+        return await windowLock.start(windows, ownerID: session.id, unlockDuringBreaks: settings.windowLock.unlockDuringBreaks)
     }
 
     /// The hourglass and candle as they are now: cheap, so it can be asked

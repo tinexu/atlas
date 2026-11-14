@@ -389,7 +389,9 @@ final class StudyModel: ObservableObject {
         refreshLive()
     }
 
-    func endSession() {
+    /// Ends the session; while locked in, asks first (a short countdown).
+    func endSession(force: Bool = false) {
+        if !force, tasksUI.requestEnd() { return }
         sessions?.end(early: true)
     }
 

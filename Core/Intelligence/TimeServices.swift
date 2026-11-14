@@ -8,14 +8,17 @@ public final class TimeServices: Sendable {
     public let recommendations: RecommendationEngine
     /// Lockdown focus mode, which runs its pomodoro on `focus`.
     public let lockdown: LockdownService
+    /// Keeps you to chosen windows during a study session.
+    public let windowLock: WindowLockService
 
     init(schedule: ScheduleService, focus: FocusService, calendar: CalendarService, recommendations: RecommendationEngine,
-         lockdown: LockdownService) {
+         lockdown: LockdownService, windowLock: WindowLockService) {
         self.schedule = schedule
         self.focus = focus
         self.calendar = calendar
         self.recommendations = recommendations
         self.lockdown = lockdown
+        self.windowLock = windowLock
     }
 }
 
@@ -39,8 +42,9 @@ extension AtlasCore {
             await self?.carryOut(recommendation) ?? .failed("ATLAS isn't ready.")
         }
         let lockdown = LockdownService(store: store, events: events, environment: environment, engine: engine, system: system, focus: focus)
+        let windowLock = WindowLockService(store: store, events: events, environment: environment, system: system, windows: windows.adapter)
         let services = TimeServices(schedule: schedule, focus: focus, calendar: calendarService, recommendations: recommendations,
-                                    lockdown: lockdown)
+                                    lockdown: lockdown, windowLock: windowLock)
         setTime(services)
 
         let actions: [any AtlasAction] = [StartFocusAction(focus: focus, store: store), StopFocusAction(focus: focus), ShortcutRunAction(),

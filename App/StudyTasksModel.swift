@@ -38,6 +38,15 @@ final class StudyTasksModel: ObservableObject {
     /// The task whose title is being edited in place (one at a time).
     @Published var editingID: UUID?
 
+    // Lock in: the windows you can pick, the ones picked, the lock running.
+    @Published private(set) var lockChoices: [WindowInfo] = []
+    @Published private(set) var lockPicked: [String] = []
+    @Published private(set) var locked: WindowLockSession?
+    /// "End the session?" while locked: a countdown before it works.
+    @Published private(set) var exitGate: LockdownExitGate?
+    private let toast = ToastPresenter()
+    private var terminationObserver: NSObjectProtocol?
+
     private var panel: NSPanel?
     private var quickAdd: QuickAddPanel?
     private var hotKey: TriggerToken?
@@ -50,9 +59,23 @@ final class StudyTasksModel: ObservableObject {
     init(core: AtlasCore?) {
         self.core = core
         subscription = core?.events.subscribe { [weak self] event in
-            guard event.name.hasPrefix("session.task") || event.name == AtlasEvent.Name.studySessionChanged
+            guard event.name.hasPrefix("session.task") || event.name.hasPrefix("windowLock.") || event.name == AtlasEvent.Name.studySessionChanged
                 || event.name == AtlasEvent.Name.studySessionEnded || event.name == AtlasEvent.Name.studyChanged else { return }
             Task { @MainActor in self?.handle(event) }
+        }
+        // The emergency exit: quitting ATLAS always unlocks.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.windowLock?.endBecauseATLASIsQuitting() }
+        }
+    }
+
+    var windowLock: WindowLockService? { core?.time?.windowLock }
+
+    func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -70,6 +93,7 @@ final class StudyTasksModel: ObservableObject {
         guard let tasks else { return }
         list = tasks.list()
         links = tasks.links()
+        locked = windowLock?.session
         registerHotKey()
     }
 
@@ -91,11 +115,16 @@ final class StudyTasksModel: ObservableObject {
                 plan = nil
                 showPanel(activate: false)
             }
+        case AtlasEvent.Name.windowLockBlocked:
+            if let message = event.payload["toast"]?.stringValue, !message.isEmpty { toast.show(message) }
+        case AtlasEvent.Name.windowLockStarted:
+            lockPicked = []
         case AtlasEvent.Name.studySessionEnded:
             plan = nil
             checkIn = nil
             allDone = false
             shownFor = nil
+            exitGate = nil
             panel?.orderOut(nil)
         default:
             break
@@ -110,8 +139,10 @@ final class StudyTasksModel: ObservableObject {
     func begin(minutes: Double? = nil, pomodoro: Bool? = nil) {
         if settings.promptAtStart {
             plan = Plan(minutes: minutes, pomodoro: pomodoro)
+            lockPicked = []
             reload()
             showPanel(activate: true)
+            Task { await refreshLockChoices() }
         } else {
             study?.beginSession(minutes: minutes, pomodoro: pomodoro)
         }
@@ -124,6 +155,7 @@ final class StudyTasksModel: ObservableObject {
         study?.beginSession(minutes: plan.minutes, pomodoro: plan.pomodoro)
         if let id = study?.sessions?.current?.id { shownFor = id }
         reload()
+        if !lockPicked.isEmpty { lockIn() }
     }
 
     func cancelPlan() {
@@ -198,6 +230,69 @@ final class StudyTasksModel: ObservableObject {
         allDone = false
         study?.endSession()
     }
+
+    // MARK: - Lock in
+
+    /// The windows open now (other apps', frontmost first), last time's first.
+    func refreshLockChoices() async {
+        guard let windowLock else { return }
+        windowLock.listedWindows = { MacWindowAdapter.listedWindows() }
+        let open = await windowLock.candidates()
+        let last = study?.settings.windowLock.lastWindows ?? []
+        func wasLast(_ window: WindowInfo) -> Bool { last.contains { $0.bundleID == window.bundleID && $0.title == window.title } }
+        lockChoices = open.filter(wasLast) + open.filter { !wasLast($0) }
+        lockPicked = lockPicked.filter { id in open.contains { $0.id.rawValue == id } }
+    }
+
+    var lastLockWindowsOpen: [WindowInfo] {
+        let last = study?.settings.windowLock.lastWindows ?? []
+        return lockChoices.filter { window in last.contains { $0.bundleID == window.bundleID && $0.title == window.title } }
+    }
+
+    func togglePick(_ window: WindowInfo) {
+        let id = window.id.rawValue
+        if let index = lockPicked.firstIndex(of: id) { lockPicked.remove(at: index) } else { lockPicked.append(id) }
+    }
+
+    func pick(_ windows: [WindowInfo]) {
+        lockPicked = windows.map(\.id.rawValue)
+    }
+
+    var pickedWindows: [LockedWindow] {
+        lockPicked.compactMap { id in lockChoices.first { $0.id.rawValue == id }.map(LockedWindow.init) }
+    }
+
+    var canLockWindows: Bool { windowLock?.canLockWindows ?? false }
+
+    /// Locks in to the picked windows for the running session.
+    func lockIn() {
+        let windows = pickedWindows
+        guard !windows.isEmpty, isRunning, let module = study?.module else { return }
+        lockPicked = []
+        Task {
+            await module.lockIn(windows)
+            reload()
+        }
+    }
+
+    /// Ending the session while locked takes a moment's decision: returns
+    /// true if it asked instead of ending.
+    func requestEnd() -> Bool {
+        guard locked != nil || windowLock?.isActive == true else { return false }
+        var gateSettings = LockdownSettings()
+        gateSettings.exitCountdownSeconds = study?.settings.windowLock.exitCountdownSeconds ?? 10
+        exitGate = LockdownExitGate(openedAt: Date(), settings: gateSettings)
+        showPanel(activate: true)
+        return true
+    }
+
+    func confirmEnd() {
+        guard let exitGate, exitGate.canConfirm(at: Date(), typed: "") else { return }
+        self.exitGate = nil
+        study?.endSession(force: true)
+    }
+
+    func cancelEnd() { exitGate = nil }
 
     // MARK: - Summary
 

@@ -42,6 +42,8 @@ public struct StudySettings: Codable, Equatable, Sendable {
     public var calculator = "https://www.desmos.com/calculator"
     /// Session tasks: the start prompt, quick add, break check-in, carry-over.
     public var tasks = SessionTaskSettings()
+    /// Locking in to chosen windows during a session.
+    public var windowLock = StudyWindowLockSettings()
     public var pomodoro: PomodoroSettings = {
         var settings = PomodoroSettings()
         settings.focusMinutes = 25
@@ -62,6 +64,7 @@ public struct StudySettings: Codable, Equatable, Sendable {
         usesPomodoro = try c.decodeIfPresent(Bool.self, forKey: .usesPomodoro) ?? defaults.usesPomodoro
         pomodoro = try c.decodeIfPresent(PomodoroSettings.self, forKey: .pomodoro) ?? defaults.pomodoro
         tasks = try c.decodeIfPresent(SessionTaskSettings.self, forKey: .tasks) ?? defaults.tasks
+        windowLock = try c.decodeIfPresent(StudyWindowLockSettings.self, forKey: .windowLock) ?? defaults.windowLock
         assignmentCalendarIDs = try c.decodeIfPresent([String].self, forKey: .assignmentCalendarIDs) ?? []
         remindersListID = try c.decodeIfPresent(String.self, forKey: .remindersListID)
         flashcards = try c.decodeIfPresent(String.self, forKey: .flashcards) ?? defaults.flashcards
@@ -286,5 +289,25 @@ public final class StudyService: @unchecked Sendable {
             try? store.saveCourse(moved)
         }
         return url?.path ?? course.folderPath
+    }
+}
+
+/// "Lock me in to these windows" for study sessions.
+public struct StudyWindowLockSettings: Codable, Equatable, Sendable {
+    /// Breaks normally keep you locked; this lets you out until focus starts again.
+    public var unlockDuringBreaks = false
+    /// Seconds before "End session" works while locked.
+    public var exitCountdownSeconds = 10
+    /// Last time's windows, picked again when they're still open.
+    public var lastWindows: [LockedWindow] = []
+
+    public init() {}
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = StudyWindowLockSettings()
+        unlockDuringBreaks = try c.decodeIfPresent(Bool.self, forKey: .unlockDuringBreaks) ?? defaults.unlockDuringBreaks
+        exitCountdownSeconds = try c.decodeIfPresent(Int.self, forKey: .exitCountdownSeconds) ?? defaults.exitCountdownSeconds
+        lastWindows = try c.decodeIfPresent([LockedWindow].self, forKey: .lastWindows) ?? []
     }
 }

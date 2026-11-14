@@ -279,6 +279,16 @@ struct StudySettingsView: View {
                     Text("Type “x2” or “🍅2” at the end of a task for an estimate, and “#CHEM101” to link a course. The quick add shortcut works from any app; write it like “opt+shift+t” or “cmd+ctrl+t”.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section {
+                    Toggle("Let me out during breaks", isOn: $settings.windowLock.unlockDuringBreaks)
+                    Stepper("Wait \(settings.windowLock.exitCountdownSeconds) s before ending a locked session",
+                            value: $settings.windowLock.exitCountdownSeconds, in: 0...60, step: 5)
+                } header: {
+                    Text("Lock in")
+                } footer: {
+                    Text("Pick windows under “Lock me in” when you plan a session. Everything else hides until it ends; quitting ATLAS always unlocks.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 AssignmentSourcesSection(settings: $settings)
                 StudyAutomationsSection(settings: $settings)
                 Section("Hourglass") {

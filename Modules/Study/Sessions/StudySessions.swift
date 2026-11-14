@@ -35,6 +35,8 @@ public final class StudySessions: @unchecked Sendable {
     let courses: StudyService
     /// The session's task list (set by `StudyModule`).
     weak var tasks: StudyTasks?
+    /// Told when a break begins (true) or focus comes back (false).
+    var onBreakChanged: ((Bool) -> Void)?
     var store: AtlasStore { core.store }
     private let lock = NSLock()
     private var active: Active?
@@ -249,6 +251,7 @@ public final class StudySessions: @unchecked Sendable {
             }
         }
         cycle.onPhase = { [weak self] _, kind, minutes, announce in
+            self?.onBreakChanged?(kind != .focus)
             guard let self, announce else { return }
             if kind != .focus { self.tasks?.breakBegan() }
             let system = self.core.system

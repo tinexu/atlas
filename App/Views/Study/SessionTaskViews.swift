@@ -15,8 +15,11 @@ struct StudySessionPanel: View {
         VStack(spacing: 14) {
             if model.plan != nil {
                 PlanningHeader()
+                LockInRow()
             } else if model.isRunning {
                 SessionTimerCard()
+                if let gate = model.exitGate { ExitGateBanner(gate: gate) }
+                LockInRow()
                 if model.allDone { AllDoneBanner() }
                 if let checkIn = model.checkIn { CheckInBanner(checkIn: checkIn) }
             }
@@ -37,6 +40,190 @@ struct StudySessionPanel: View {
         .background(.background)
         .animation(.easeInOut(duration: 0.2), value: model.checkIn)
         .animation(.easeInOut(duration: 0.2), value: model.allDone)
+        .animation(.easeInOut(duration: 0.2), value: model.exitGate)
+    }
+}
+
+// MARK: - Lock in
+
+/// "Lock me in": the windows picked for this session, or the lock running.
+private struct LockInRow: View {
+    @EnvironmentObject private var model: StudyTasksModel
+    @State private var picking = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: model.locked != nil ? "lock.fill" : "lock.open")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(model.locked != nil ? Color.white : Color.secondary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(model.locked != nil ? AnyShapeStyle(Color.orange.gradient) : AnyShapeStyle(.quaternary)))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 4)
+            if model.locked == nil {
+                Button(model.lockPicked.isEmpty ? "Choose…" : "Change…") {
+                    picking = true
+                    Task { await model.refreshLockChoices() }
+                }
+                .controlSize(.small)
+                .popover(isPresented: $picking, arrowEdge: .bottom) {
+                    WindowPicker(planning: model.plan != nil) { picking = false }.environmentObject(model)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(model.locked != nil ? AnyShapeStyle(Color.orange.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.5)))
+        )
+    }
+
+    private var title: String {
+        if model.locked != nil { return "Locked in" }
+        return model.lockPicked.isEmpty ? "Lock me in" : "Lock in when the timer starts"
+    }
+
+    private var subtitle: String {
+        if let locked = model.locked { return "Only \(locked.summary) until the session ends" }
+        let picked = model.pickedWindows
+        if picked.isEmpty { return "Pick the windows you'll use; everything else hides" }
+        return picked.map(\.label).joined(separator: ", ")
+    }
+}
+
+/// The open windows to pick from, last time's first.
+private struct WindowPicker: View {
+    @EnvironmentObject private var model: StudyTasksModel
+    let planning: Bool
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Lock me in to…").font(.headline)
+                Spacer()
+                Button { Task { await model.refreshLockChoices() } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).help("Refresh the list of windows")
+            }
+            if !model.canLockWindows {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("ATLAS doesn't have Accessibility permission, so it can only lock whole apps, not single windows.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    Button("Open Accessibility Settings…") { model.openAccessibilitySettings() }.controlSize(.small)
+                }
+            }
+            let last = model.lastLockWindowsOpen
+            if !last.isEmpty, model.lockPicked.isEmpty {
+                Button("Same as last time (\(last.count))") { model.pick(last) }.controlSize(.small)
+            }
+            if model.lockChoices.isEmpty {
+                Text("No windows open. Open what you need, then refresh.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(model.lockChoices) { window in WindowChoiceRow(window: window) }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+            Text("Everything else hides until the session ends. Other windows of these apps are minimized. Quitting ATLAS always unlocks.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if !model.lockPicked.isEmpty {
+                    Button("Clear") { model.pick([]) }
+                }
+                Spacer()
+                if planning {
+                    Button("Done", action: close).buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Cancel", action: close)
+                    Button {
+                        model.lockIn()
+                        close()
+                    } label: { Label("Lock in", systemImage: "lock.fill") }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.lockPicked.isEmpty)
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 340)
+    }
+}
+
+private struct WindowChoiceRow: View {
+    @EnvironmentObject private var model: StudyTasksModel
+    let window: WindowInfo
+
+    var body: some View {
+        let picked = model.lockPicked.contains(window.id.rawValue)
+        Button { model.togglePick(window) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(picked ? Color.orange : Color.secondary.opacity(0.7))
+                AppIcon(bundleID: window.bundleID).frame(width: 20, height: 20)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(window.title.isEmpty ? window.appName : window.title).font(.callout).lineLimit(1).truncationMode(.middle)
+                    Text(window.isMinimized ? "\(window.appName) · minimized" : window.appName)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(picked ? Color.orange.opacity(0.12) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AppIcon: View {
+    let bundleID: String
+
+    var body: some View {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable()
+        } else {
+            Image(systemName: "macwindow").foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// "End the session and unlock?": the button works after a short countdown.
+private struct ExitGateBanner: View {
+    @EnvironmentObject private var model: StudyTasksModel
+    let gate: LockdownExitGate
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let left = gate.secondsLeft(at: context.date)
+            VStack(alignment: .leading, spacing: 8) {
+                Label("You're locked in. End the session and unlock?", systemImage: "lock.fill")
+                    .font(.callout.weight(.semibold))
+                HStack {
+                    Button(left > 0 ? "End in \(left)…" : "End and unlock") { model.confirmEnd() }
+                        .buttonStyle(.borderedProminent).tint(.red)
+                        .disabled(left > 0)
+                    Button("Keep going") { model.cancelEnd() }.keyboardShortcut(.cancelAction)
+                }
+                .controlSize(.small)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.red.opacity(0.1)))
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }
 

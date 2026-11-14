@@ -294,6 +294,11 @@ final class MockWindowAdapter: WindowAdapter, @unchecked Sendable {
         }
     }
 
+    /// The window closed.
+    func removeWindow(_ id: WindowID) {
+        lock.synchronized { _windows.removeAll { $0.id == id } }
+    }
+
     func frame(of id: WindowID) -> CGRect? {
         lock.synchronized { _windows.first { $0.id == id }?.frame }
     }

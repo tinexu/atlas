@@ -252,6 +252,29 @@ public final class MacWindowAdapter: WindowAdapter, @unchecked Sendable {
         }
     }
 
+    /// Regular apps' on-screen windows from the public window list, for
+    /// when Accessibility isn't available: no control, just what's open.
+    /// Titles need Screen Recording permission, so they may be empty.
+    public static func listedWindows() -> [WindowInfo] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return [] }
+        var result: [WindowInfo] = []
+        for (index, info) in list.enumerated() {
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t,
+                  let number = info[kCGWindowNumber as String] as? Int,
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict), bounds.width > 80, bounds.height > 60,
+                  let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular,
+                  let bundleID = app.bundleIdentifier
+            else { continue }
+            result.append(WindowInfo(id: WindowID("cg-\(number)"), bundleID: bundleID, appName: app.localizedName ?? bundleID,
+                                     processID: pid, title: info[kCGWindowName as String] as? String ?? "", frame: bounds,
+                                     displayID: nil, isAppHidden: app.isHidden, zIndex: index))
+        }
+        return result
+    }
+
     private static func roughlyEqual(_ a: CGRect, _ b: CGRect) -> Bool {
         abs(a.minX - b.minX) < 3 && abs(a.minY - b.minY) < 3 && abs(a.width - b.width) < 3 && abs(a.height - b.height) < 3
     }
